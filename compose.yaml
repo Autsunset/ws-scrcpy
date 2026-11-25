@@ -1,0 +1,41 @@
+services:
+  ws-scrcpy:
+    container_name: ws-scrcpy
+    build: .
+    image: ws-scrcpy-local
+    init: true
+    restart: unless-stopped
+    environment:
+      WS_SCRCPY_ADB_TARGET: ${REDROID_ADB_TARGET:-redroid:5555}
+      WS_SCRCPY_AUTH_ORIGIN: ${WS_SCRCPY_AUTH_ORIGIN:-http://localhost:8080}
+      WS_SCRCPY_PASSWORD_FILE: /run/secrets/ws_scrcpy_password
+    secrets:
+      - ws_scrcpy_password
+    ports:
+      - '${WS_SCRCPY_BIND_IP:-127.0.0.1}:${WS_SCRCPY_HTTP_PORT:-8080}:8000'
+    volumes:
+      - adb-keys:/home/node/.android
+    networks:
+      - default
+      - redroid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ['CMD', 'node', '-e', 'fetch("http://127.0.0.1:8000/healthz").then(response => process.exit(response.status === 204 ? 0 : 1)).catch(() => process.exit(1))']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+secrets:
+  ws_scrcpy_password:
+    file: ${WS_SCRCPY_PASSWORD_PATH:-./.secrets/admin-password}
+
+volumes:
+  adb-keys:
+
+networks:
+  redroid:
+    external: true
+    name: ${REDROID_NETWORK:?Set REDROID_NETWORK to a user-defined network shared with Redroid}

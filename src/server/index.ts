@@ -8,11 +8,15 @@ import { MwFactory } from './mw/Mw';
 import { WebsocketProxy } from './mw/WebsocketProxy';
 import { HostTracker } from './mw/HostTracker';
 import { WebsocketMultiplexer } from './mw/WebsocketMultiplexer';
+import { SessionAuth } from './services/SessionAuth';
 
 const servicesToStart: ServiceClass[] = [HttpServer, WebSocketServer];
 
 // MWs that accept WebSocket
-const mwList: MwFactory[] = [WebsocketProxy, WebsocketMultiplexer];
+const mwList: MwFactory[] = [WebsocketMultiplexer];
+if (!SessionAuth.getInstance().enabled) {
+    mwList.push(WebsocketProxy);
+}
 
 // MWs that accept Multiplexer
 const mw2List: MwFactory[] = [HostTracker];

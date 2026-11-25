@@ -6,15 +6,28 @@
 .more-box {
     display: none;
     position: absolute;
-    right: var(--panel-width);
-    background-color: var(--controls-bg-color);
-    z-index: 2;
-    padding: 0 .714rem .714rem .714rem;
+    z-index: 12;
+    box-sizing: border-box;
+    top: 0.65rem;
+    right: calc(var(--panel-width) + 0.65rem);
+    width: min(23.5rem, calc(100% - var(--panel-width) - 1.3rem));
+    max-height: calc(100% - 1.3rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 1rem;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 1rem;
+    background: var(--controls-bg-color);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: var(--shadow-lg);
+    font: 0.92rem/1.5 var(--font-sans);
 }
 
-.text-with-shadow, .more-box label {
+.text-with-shadow,
+.more-box label {
     color: var(--text-color);
-    text-shadow: var(--text-shadow-color) 0 0 .357rem;
+    text-shadow: none;
 }
 
 .spoiler > input ~ .box {
@@ -25,20 +38,161 @@
     display: block;
 }
 
+.spoiler > label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.55rem;
+    background: var(--surface-muted-color);
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
 .spoiler > label::before {
-    content: '►';
-    margin-right: 5px;
+    content: '▸';
+    font-size: 0.85em;
+    color: var(--text-color-light);
+    transition: transform 0.15s ease;
 }
 
 .spoiler > input:checked ~ label::before {
-    content: '▼';
+    content: '▾';
 }
 
 .spoiler > input:checked ~ div {
     display: block;
-    padding: 10px;
+    padding: 0.65rem 0.15rem 0.25rem;
 }
 
 .spoiler > input {
     display: none;
+}
+
+.more-box > p {
+    margin: 0.55rem 0;
+}
+
+.more-box button,
+.more-box select,
+.more-box textarea,
+.more-box input:not([type=range]) {
+    box-sizing: border-box;
+    padding: 0.42rem 0.7rem;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 0.55rem;
+    color: var(--text-color);
+    background: var(--surface-bg-color);
+    font: inherit;
+    font-size: 0.875rem;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.more-box textarea:focus,
+.more-box select:focus,
+.more-box input:not([type=range]):focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px var(--accent-soft-color);
+}
+
+.more-box textarea.text-area {
+    min-height: 4.2rem;
+    margin-bottom: 0.45rem;
+}
+
+.more-box .box > div {
+    display: grid;
+    gap: 0.3rem;
+    margin-top: 0.65rem;
+}
+
+.more-box .box > div > label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-color-light);
+}
+
+.more-box .box > button,
+.more-box > p > button,
+.more-box .touch-controls button {
+    margin: 0.4rem 0.4rem 0 0;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.more-box button:hover {
+    background: var(--surface-muted-color);
+}
+
+.more-box .box > button:last-child {
+    border-color: transparent;
+    color: var(--accent-text-color);
+    background: var(--accent-color);
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.more-box .box > button:last-child:hover {
+    background: var(--accent-hover-color);
+}
+
+.more-box .text-with-shadow {
+    margin: 0 0 0.6rem;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.more-box .stream-report {
+    margin: 0.55rem 0 0.25rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.55rem;
+    background: var(--surface-muted-color);
+    color: var(--text-color-light);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+.more-box .stream-report:empty {
+    display: none;
+}
+
+.touch-controls {
+    margin-top: 0.7rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.touch-controls summary {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--text-color-light);
+    cursor: pointer;
+}
+
+@media (pointer: coarse) {
+    .more-box button {
+        min-height: 44px;
+    }
+}
+
+@media (pointer: coarse) and (max-width: 1100px) and (orientation: portrait) {
+    .more-box {
+        top: auto;
+        right: max(0.5rem, env(safe-area-inset-right));
+        bottom: calc(var(--toolbar-height) + 0.5rem);
+        left: max(0.5rem, env(safe-area-inset-left));
+        width: auto;
+        max-height: calc(100dvh - var(--toolbar-height) - env(safe-area-inset-top) - 1rem);
+    }
+
+    .more-box select,
+    .more-box textarea,
+    .more-box input:not([type=range]) {
+        font-size: max(16px, 1rem);
+    }
 }

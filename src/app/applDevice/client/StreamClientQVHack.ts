@@ -62,7 +62,7 @@ export class StreamClientQVHack extends StreamClient<ParamsStream> {
                     player.play();
                 }
                 if (player.getState() === STATE.PLAYING) {
-                    player.pushFrame(new Uint8Array(data));
+                    player.pushFrame(data);
                 }
             });
         }

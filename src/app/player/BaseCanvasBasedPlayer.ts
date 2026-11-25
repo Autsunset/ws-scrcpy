@@ -79,13 +79,13 @@ export abstract class BaseCanvasBasedPlayer extends BasePlayer {
 
     protected onFrameDecoded(width: number, height: number, frame: any): void {
         if (!this.receivedFirstFrame) {
-            // decoded frame with previous video settings
+            this.dropFrame(frame);
             return;
         }
         let dropped = 0;
-        const maxStored = this.videoSettings.maxFps / 10; // for 100ms
+        const maxStored = this.maxDecodedFrames();
 
-        while (this.decodedFrames.length > maxStored) {
+        while (this.decodedFrames.length >= maxStored) {
             const data = this.decodedFrames.shift();
             if (data) {
                 this.dropFrame(data.frame);
@@ -109,6 +109,10 @@ export abstract class BaseCanvasBasedPlayer extends BasePlayer {
         // dispose frame if required
     }
 
+    protected maxDecodedFrames(): number {
+        return Math.max(1, Math.ceil(this.videoSettings.maxFps / 10));
+    }
+
     private shiftFrame(): void {
         if (this.getState() !== BasePlayer.STATE.PLAYING) {
             return;
@@ -125,9 +129,6 @@ export abstract class BaseCanvasBasedPlayer extends BasePlayer {
 
         while (this.videoStats.length && this.videoStats[0].timestamp < oneSecondBefore) {
             this.videoStats.shift();
-        }
-        while (this.inputBytes.length && this.inputBytes[0].timestamp < oneSecondBefore) {
-            this.inputBytes.shift();
         }
         let decodedFrames = 0;
         let droppedFrames = 0;
@@ -201,11 +202,6 @@ export abstract class BaseCanvasBasedPlayer extends BasePlayer {
         this.clearState();
         const { width, height } = screenInfo.videoSize;
         this.initCanvas(width, height);
-        this.framesList = [];
-        if (this.animationFrameId) {
-            cancelAnimationFrame(this.animationFrameId);
-            this.animationFrameId = undefined;
-        }
     }
 
     public pushFrame(frame: Uint8Array): void {
@@ -232,5 +228,10 @@ export abstract class BaseCanvasBasedPlayer extends BasePlayer {
 
     protected clearState(): void {
         this.framesList = [];
+        this.decodedFrames.splice(0).forEach(({ frame }) => this.dropFrame(frame));
+        if (this.animationFrameId !== undefined) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = undefined;
+        }
     }
 }

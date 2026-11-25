@@ -2,6 +2,10 @@ import '../style/app.css';
 import { StreamClientScrcpy } from './googDevice/client/StreamClientScrcpy';
 import { HostTracker } from './client/HostTracker';
 import { Tool } from './client/Tool';
+import { addCompactMode, bindFloatingShortcut } from './googDevice/FloatingStream';
+import { createInstallGuide, startPwa } from './Pwa';
+
+startPwa();
 
 window.onload = async function (): Promise<void> {
     const hash = location.hash.replace(/^#!/, '');
@@ -30,6 +34,9 @@ window.onload = async function (): Promise<void> {
 
     if (action === StreamClientScrcpy.ACTION && typeof parsedQuery.get('udid') === 'string') {
         StreamClientScrcpy.start(parsedQuery);
+        if (new URLSearchParams(location.search).get('compact') === '1') {
+            addCompactMode();
+        }
         return;
     }
 
@@ -108,5 +115,33 @@ window.onload = async function (): Promise<void> {
             DeviceTracker.registerTool(tool);
         });
     }
-    HostTracker.start();
+    document.body.classList.add('dashboard');
+    bindFloatingShortcut();
+    const header = document.createElement('header');
+    header.className = 'dashboard-header';
+    const title = document.createElement('h1');
+    title.textContent = '云手机';
+    const summary = document.createElement('p');
+    summary.setAttribute('role', 'status');
+    summary.textContent = '正在连接设备服务…';
+    header.append(title, summary, createInstallGuide());
+    document.body.prepend(header);
+    const tracker = HostTracker.getInstance();
+    tracker.on('hosts', (count) => {
+        summary.textContent = count ? '选择 Android 设备开始投屏' : '没有可用的设备服务';
+    });
+    tracker.on('disconnected', () => {
+        summary.textContent = '设备服务已断开，请刷新重试';
+    });
+    void fetch('session', { redirect: 'error' })
+        .then((response) => {
+            if (response.status === 204) {
+                const logout = document.createElement('a');
+                logout.href = 'logout';
+                logout.className = 'logout-link';
+                logout.textContent = '退出登录';
+                header.append(logout);
+            }
+        })
+        .catch(() => undefined);
 };

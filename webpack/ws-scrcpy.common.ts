@@ -6,6 +6,7 @@ import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import HtmlWebpackPlugin from 'html-webpack-plugin';
 import GeneratePackageJsonPlugin from '@dead50f7/generate-package-json-webpack-plugin';
 import { mergeWithDefaultConfig } from './build.config.utils';
+import { PWA_ASSETS } from '../src/common/PwaAssets';
 
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
 export const SERVER_DIST_PATH = path.join(PROJECT_ROOT, 'dist');
@@ -98,6 +99,22 @@ const front: webpack.Configuration = {
     entry: path.join(PROJECT_ROOT, './src/app/index.ts'),
     externals: ['fs'],
     plugins: [
+        {
+            apply(compiler: webpack.Compiler) {
+                compiler.hooks.thisCompilation.tap('PwaAssets', (compilation) => {
+                    compilation.hooks.processAssets.tap(
+                        { name: 'PwaAssets', stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL },
+                        () => {
+                            for (const name of PWA_ASSETS) {
+                                const file = path.join(PROJECT_ROOT, 'src/public', name);
+                                compilation.fileDependencies.add(file);
+                                compilation.emitAsset(name, new webpack.sources.RawSource(fs.readFileSync(file)));
+                            }
+                        },
+                    );
+                });
+            },
+        },
         new HtmlWebpackPlugin({
             template: path.join(PROJECT_ROOT, '/src/public/index.html'),
             inject: 'head',

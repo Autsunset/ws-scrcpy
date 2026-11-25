@@ -13,17 +13,16 @@
     position: fixed;
     top: 0;
     left: 0;
-    background-color: rgba(0, 0, 0, 0.75);
+    background-color: rgba(15, 23, 42, 0.65);
     z-index: 3;
 }
 
 .dialog-container {
-    font-family: monospace;
+    font-family: var(--font-sans);
     width: 75%;
     max-width: 30rem;
     min-width: 20rem;
-    background-color: var(--main-bg-color);
-    /*border-radius: 0.3rem;*/
+    background-color: var(--surface-bg-color);
     overflow: hidden;
 }
 
@@ -32,8 +31,10 @@
     min-height: 100%;
 }
 
-.dialog-container button, .dialog-container select, .dialog-container input {
-    font-family: monospace;
+.dialog-container button,
+.dialog-container select,
+.dialog-container input {
+    font-family: var(--font-sans);
 }
 
 .dialog-container button {
@@ -44,11 +45,8 @@
     text-overflow: ellipsis;
 }
 
-.dialog-block {
-}
-
 .dialog-header {
-    background-color: var(--header-bg-color);
+    background-color: var(--surface-bg-color);
     height: var(--header-height);
     overflow: hidden;
     display: flex;
@@ -64,7 +62,7 @@
 
 .dialog-body {
     padding: var(--block-top-padding) 0.5rem var(--block-bottom-padding);
-    background-color: var(--control-buttons-bg-color);
+    background-color: var(--surface-bg-color);
     overflow: auto;
 }
 
@@ -84,47 +82,49 @@
 }
 
 .dialog-footer {
-    /*display: flex;*/
-    /*flex-direction: row-reverse;*/
     padding: var(--block-top-padding) 0.5rem var(--block-bottom-padding);
-    background-color: var(--stream-bg-color);
+    background-color: var(--surface-bg-color);
     height: var(--footer-height);
     overflow: hidden;
 }
 
 .dialog-footer span.subtitle {
-    font-weight: lighter;
+    font-weight: 500;
+    font-size: 0.85rem;
+    color: var(--text-color-light);
     line-height: var(--footer-height);
     float: left;
 }
 
 .dialog-footer button {
-    padding: var(--button-top-padding) 0.5rem var(--button-bottom-padding);
+    padding: var(--button-top-padding) 0.65rem var(--button-bottom-padding);
     margin: 0 0 0 0.5rem;
-    border-radius: 0.3rem;
-    /*background-color: var(--main-bg-color);*/
+    border-radius: 0.5rem;
     color: var(--button-text-color);
     border: 1px solid var(--button-border-color);
     cursor: pointer;
-    background-color: rgba(0, 0, 0, 0);
+    background-color: transparent;
     height: var(--footer-height);
     float: right;
 }
 
 .dialog-footer button:disabled {
     cursor: not-allowed;
+    opacity: 0.5;
     color: var(--text-color-light);
 }
 
 .controls .label {
     grid-column: labels;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-color);
 }
 
 .controls .input {
     grid-column: controls;
     box-sizing: border-box;
     margin: 0;
-    /*height: 2.75ex;*/
 }
 
 .controls .button {
@@ -135,6 +135,203 @@
     display: grid;
     grid-template-columns: [labels] 35% [controls] 65%;
     padding: 1rem;
-    grid-gap: 0.2rem;
+    grid-gap: 0.45rem;
     align-items: center;
+}
+
+.dialog-background.configureDialog {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(7, 11, 20, 0.72);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.dialog-container.configureDialog {
+    display: flex;
+    flex-direction: column;
+    width: min(100%, 36rem);
+    min-width: 0;
+    min-height: 0;
+    height: auto;
+    max-height: calc(100dvh - 2rem);
+    max-width: none;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 1.15rem;
+    background: var(--surface-bg-color);
+    box-shadow: var(--shadow-lg);
+}
+
+.configureDialog,
+.configureDialog button,
+.configureDialog select,
+.configureDialog input {
+    font-family: var(--font-sans);
+}
+
+.configureDialog .dialog-header,
+.configureDialog .dialog-footer {
+    flex-shrink: 0;
+    height: auto;
+    padding: 1rem 1.25rem;
+    background: var(--surface-bg-color);
+}
+
+.configureDialog .dialog-header {
+    border-bottom: 1px solid var(--border-color);
+    gap: 0.75rem;
+}
+
+.configureDialog .dialog-title {
+    padding: 0;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+}
+
+.dialog-device-name {
+    min-width: 0;
+    margin-inline-start: auto;
+    overflow: hidden;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    background: var(--surface-muted-color);
+    color: var(--text-color-light);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.configureDialog .dialog-body {
+    height: auto;
+    min-height: 0;
+    padding: 0.9rem 1.25rem 1.15rem;
+    background: var(--surface-bg-color);
+}
+
+.configureDialog .dialog-body.hidden {
+    display: none;
+}
+
+.configureDialog .controls {
+    grid-template-columns: [labels] minmax(7.5rem, 0.75fr) [controls] minmax(0, 1.45fr);
+    gap: 0.85rem 1rem;
+    padding: 0.5rem 0;
+}
+
+.configureDialog select,
+.configureDialog input:not([type=range]):not([type=checkbox]) {
+    min-width: 0;
+    min-height: 2.35rem;
+    padding: 0.4rem 0.65rem;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 0.55rem;
+    color: var(--text-color);
+    background: var(--surface-muted-color);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.configureDialog select:focus,
+.configureDialog input:not([type=range]):not([type=checkbox]):focus {
+    outline: none;
+    border-color: var(--accent-color);
+    background: var(--surface-bg-color);
+    box-shadow: 0 0 0 3px var(--accent-soft-color);
+}
+
+.settings-advanced {
+    margin: 0.85rem 0;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.75rem;
+    background: var(--surface-muted-color);
+}
+
+.settings-advanced summary {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-color);
+    cursor: pointer;
+    user-select: none;
+}
+
+.settings-actions,
+.configureDialog .dialog-footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.settings-actions {
+    margin-top: 0.65rem;
+}
+
+.settings-actions button,
+.configureDialog .dialog-footer button {
+    height: auto;
+    margin: 0;
+    padding: 0.5rem 0.95rem;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 0.55rem;
+    color: var(--text-color);
+    background: var(--surface-bg-color);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-actions button:hover:not(:disabled),
+.configureDialog .dialog-footer button:hover:not(:disabled) {
+    background: var(--surface-muted-color);
+}
+
+.configureDialog .dialog-footer {
+    justify-content: flex-end;
+    border-top: 1px solid var(--border-color);
+}
+
+.configureDialog .dialog-footer .subtitle {
+    margin-inline-end: auto;
+    float: none;
+    line-height: 1.4;
+}
+
+.configureDialog .dialog-footer button:last-child:not(:disabled) {
+    border-color: transparent;
+    color: var(--accent-text-color);
+    background: var(--accent-color);
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+}
+
+.configureDialog .dialog-footer button:last-child:not(:disabled):hover {
+    background: var(--accent-hover-color);
+}
+
+@media (max-width: 480px) {
+    .dialog-background.configureDialog {
+        align-items: end;
+        padding: 0 max(0.4rem, env(safe-area-inset-right)) max(0.4rem, env(safe-area-inset-bottom))
+            max(0.4rem, env(safe-area-inset-left));
+    }
+
+    .dialog-container.configureDialog {
+        max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem);
+        border-radius: 1.15rem 1.15rem 0.85rem 0.85rem;
+    }
+
+    .configureDialog .controls {
+        grid-template-columns: [labels controls] minmax(0, 1fr);
+        gap: 0.45rem;
+    }
+
+    .configureDialog select,
+    .configureDialog input:not([type=range]):not([type=checkbox]) {
+        font-size: 16px;
+    }
 }

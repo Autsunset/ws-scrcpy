@@ -17,6 +17,42 @@ function toHex(value: number) {
     return value.toString(16).padStart(2, '0').toUpperCase();
 }
 
+function annexBUnits(packet: Uint8Array): Uint8Array[] {
+    const units: Uint8Array[] = [];
+    let start = -1;
+    let prefixLength = 0;
+    for (let offset = 0; offset + 3 < packet.length; offset++) {
+        if (packet[offset] || packet[offset + 1]) {
+            continue;
+        }
+        const prefix = packet[offset + 2] === 1 ? 3 : packet[offset + 2] === 0 && packet[offset + 3] === 1 ? 4 : 0;
+        if (!prefix) {
+            continue;
+        }
+        if (start >= 0) {
+            units.push(packet.subarray(start + prefixLength, offset));
+        }
+        start = offset;
+        prefixLength = prefix;
+        offset += prefix - 1;
+    }
+    if (start >= 0) {
+        units.push(packet.subarray(start + prefixLength));
+    }
+    return units;
+}
+
+function packAnnexB(units: Uint8Array[]): Uint8Array {
+    const bytes = new Uint8Array(units.reduce((length, unit) => length + 4 + unit.length, 0));
+    let offset = 0;
+    for (const unit of units) {
+        bytes[offset + 3] = 1;
+        bytes.set(unit, offset + 4);
+        offset += 4 + unit.length;
+    }
+    return bytes;
+}
+
 export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
     public static readonly storageKeyPrefix = 'WebCodecsPlayer';
     public static readonly playerFullName = 'WebCodecs';
@@ -24,21 +60,15 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
 
     public static readonly preferredVideoSettings: VideoSettings = new VideoSettings({
         lockedVideoOrientation: -1,
-        bitrate: 524288,
-        maxFps: 24,
-        iFrameInterval: 5,
-        bounds: new Size(480, 480),
+        bitrate: 8_000_000,
+        maxFps: 30,
+        iFrameInterval: 2,
+        bounds: new Size(1280, 1280),
         sendFrameMeta: false,
     });
 
     public static isSupported(): boolean {
-        if (typeof VideoDecoder !== 'function' || typeof VideoDecoder.isConfigSupported !== 'function') {
-            return false;
-        }
-
-        // FIXME: verify support
-        // const result = await VideoDecoder.isConfigSupported();
-        return true;
+        return typeof VideoDecoder === 'function' && typeof VideoDecoder.isConfigSupported === 'function';
     }
 
     private static parseSPS(data: Uint8Array): ParametersSubSet {
@@ -70,10 +100,12 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
     public readonly supportsScreenshot = true;
     private context: CanvasRenderingContext2D;
     private decoder: VideoDecoder;
-    private buffer: ArrayBuffer | undefined;
-    private hadIDR = false;
-    private bufferedSPS = false;
-    private bufferedPPS = false;
+    private configuration?: VideoDecoderConfig;
+    private sps?: Uint8Array;
+    private pps?: Uint8Array;
+    private needsKeyFrame = true;
+    private timestamp = -1;
+    private queueRecoveries = 0;
 
     constructor(udid: string, displayInfo?: DisplayInfo, name = WebCodecsPlayer.playerFullName) {
         super(udid, displayInfo, name, WebCodecsPlayer.storageKeyPrefix);
@@ -95,19 +127,6 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
                 this.stop();
             },
         });
-    }
-
-    protected addToBuffer(data: Uint8Array): Uint8Array {
-        let array: Uint8Array;
-        if (this.buffer) {
-            array = new Uint8Array(this.buffer.byteLength + data.byteLength);
-            array.set(new Uint8Array(this.buffer));
-            array.set(new Uint8Array(data), this.buffer.byteLength);
-        } else {
-            array = data;
-        }
-        this.buffer = array.buffer;
-        return array;
     }
 
     protected scaleCanvas(width: number, height: number): void {
@@ -133,49 +152,87 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
     }
 
     protected decode(data: Uint8Array): void {
-        if (!data || data.length < 4) {
+        if (data.length < 4) {
             return;
         }
-        const type = data[4] & 31;
-        const isIDR = type === NALU.IDR;
-
-        if (type === NALU.SPS) {
-            const { codec, width, height } = WebCodecsPlayer.parseSPS(data.subarray(4));
-            this.scaleCanvas(width, height);
-            const config: VideoDecoderConfig = {
-                codec,
-                optimizeForLatency: true,
-            } as VideoDecoderConfig;
-            this.decoder.configure(config);
-            this.bufferedSPS = true;
-            this.addToBuffer(data);
-            this.hadIDR = false;
-            return;
-        } else if (type === NALU.PPS) {
-            this.bufferedPPS = true;
-            this.addToBuffer(data);
-            return;
-        } else if (type === NALU.SEI) {
-            // Workaround for lonely SEI from ws-qvh
-            if (!this.bufferedSPS || !this.bufferedPPS) {
-                return;
+        const units = annexBUnits(data);
+        let key = false;
+        let picture = false;
+        for (const unit of units) {
+            const type = unit[0] & 31;
+            if (type === NALU.SPS) {
+                this.updateSps(unit);
+            } else if (type === NALU.PPS) {
+                this.pps = unit;
+            } else if (type === NALU.IDR || type === NALU.NDR) {
+                key = key || type === NALU.IDR;
+                picture = true;
             }
         }
-        const array = this.addToBuffer(data);
-        this.hadIDR = this.hadIDR || isIDR;
-        if (array && this.decoder.state === 'configured' && this.hadIDR) {
-            this.buffer = undefined;
-            this.bufferedPPS = false;
-            this.bufferedSPS = false;
-            this.decoder.decode(
-                new EncodedVideoChunk({
-                    type: 'key',
-                    timestamp: 0,
-                    data: array.buffer,
-                }),
-            );
+        if (!picture || !this.configuration || this.decoder.state === 'closed') {
             return;
         }
+        const maxQueued = Math.min(12, Math.max(4, Math.ceil(this.videoSettings.maxFps / 6)));
+        if (this.decoder.decodeQueueSize >= maxQueued) {
+            this.decoder.reset();
+            this.clearState();
+            this.needsKeyFrame = true;
+            this.queueRecoveries++;
+        }
+        if (this.needsKeyFrame && !key) {
+            return;
+        }
+        let bytes = data;
+        if (key) {
+            if (!this.sps || !this.pps) {
+                return;
+            }
+            bytes = packAnnexB([
+                this.sps,
+                this.pps,
+                ...units.filter((unit) => (unit[0] & 31) !== NALU.SPS && (unit[0] & 31) !== NALU.PPS),
+            ]);
+        }
+        try {
+            if (this.decoder.state === 'unconfigured') {
+                this.decoder.configure(this.configuration);
+            }
+            this.timestamp = Math.max(this.timestamp + 1, Math.round(performance.now() * 1000));
+            this.decoder.decode(
+                new EncodedVideoChunk({
+                    type: key ? 'key' : 'delta',
+                    timestamp: this.timestamp,
+                    data: bytes,
+                }),
+            );
+            this.receivedFirstFrame = true;
+            this.needsKeyFrame = false;
+        } catch (error) {
+            console.error(`[${this.name}]`, error);
+            this.stop();
+        }
+    }
+
+    private updateSps(unit: Uint8Array): void {
+        if (this.sps?.length === unit.length && this.sps.every((value, index) => value === unit[index])) {
+            return;
+        }
+        const { codec, width, height } = WebCodecsPlayer.parseSPS(unit);
+        if (this.decoder.state === 'configured') {
+            this.decoder.reset();
+        }
+        this.configuration = { codec, optimizeForLatency: true } as VideoDecoderConfig;
+        this.sps = unit;
+        this.needsKeyFrame = true;
+        this.scaleCanvas(width, height);
+    }
+
+    protected maxDecodedFrames(): number {
+        return 1;
+    }
+
+    protected getAdditionalQualityStats(): string[] {
+        return [`Decoder queue: ${this.decoder.decodeQueueSize} · Resyncs: ${this.queueRecoveries}`];
     }
 
     protected drawDecoded = (): void => {
@@ -183,8 +240,11 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
             const data = this.decodedFrames.shift();
             if (data) {
                 const frame: VideoFrame = data.frame;
-                this.context.drawImage(frame, 0, 0);
-                frame.close();
+                try {
+                    this.context.drawImage(frame, 0, 0);
+                } finally {
+                    frame.close();
+                }
             }
         }
         if (this.decodedFrames.length) {
@@ -216,7 +276,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
 
     public stop(): void {
         super.stop();
-        if (this.decoder.state === 'configured') {
+        if (this.decoder.state !== 'closed') {
             this.decoder.close();
         }
     }

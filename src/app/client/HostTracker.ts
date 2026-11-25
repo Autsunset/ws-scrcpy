@@ -11,7 +11,7 @@ import { ChannelCode } from '../../common/ChannelCode';
 const TAG = '[HostTracker]';
 
 export interface HostTrackerEvents {
-    // hosts: HostItem[];
+    hosts: number;
     disconnected: CloseEvent;
     error: string;
 }
@@ -64,7 +64,7 @@ export class HostTracker extends ManagerClient<ParamsBase, HostTrackerEvents> {
             }
             case MessageType.HOSTS: {
                 const msg = message as MessageHosts;
-                // this.emit('hosts', msg.data);
+                this.emit('hosts', (msg.data.local?.length ?? 0) + (msg.data.remote?.length ?? 0));
                 if (msg.data.local) {
                     msg.data.local.forEach(({ type }) => {
                         const secure = location.protocol === 'https:';

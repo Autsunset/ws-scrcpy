@@ -30,6 +30,7 @@ import { ACTION } from '../../../common/Action';
 import { StreamReceiverScrcpy } from './StreamReceiverScrcpy';
 import { ParamsDeviceTracker } from '../../../types/ParamsDeviceTracker';
 import { ScrcpyFilePushStream } from '../filePush/ScrcpyFilePushStream';
+import { StreamFullscreen } from '../StreamFullscreen';
 
 type StartParams = {
     udid: string;
@@ -48,17 +49,23 @@ export class StreamClientScrcpy
     public static ACTION = 'stream';
     private static players: Map<string, PlayerClass> = new Map<string, PlayerClass>();
 
-    private controlButtons?: HTMLElement;
+    private videoViewport?: HTMLElement;
+    private fullscreen?: StreamFullscreen;
     private deviceName = '';
     private clientId = -1;
     private clientsCount = -1;
     private joinedStream = false;
-    private requestedVideoSettings?: VideoSettings;
+    private applyProfileOnJoin = false;
+    private profileTimer?: ReturnType<typeof setTimeout>;
+    private requestedProfile?: VideoSettings;
+    private reportedProfile?: VideoSettings;
     private touchHandler?: FeaturedInteractionHandler;
     private moreBox?: GoogMoreBox;
     private player?: BasePlayer;
     private filePushHandler?: FilePushHandler;
     private fitToScreen?: boolean;
+    private streamStatus?: HTMLElement;
+    private manuallyStopped = false;
     private readonly streamReceiver: StreamReceiverScrcpy;
 
     public static registerPlayer(playerClass: PlayerClass): void {
@@ -69,6 +76,35 @@ export class StreamClientScrcpy
 
     public static getPlayers(): PlayerClass[] {
         return Array.from(this.players.values());
+    }
+
+    public static getPreferredPlayer(udid?: string): PlayerClass | undefined {
+        let saved = '';
+        if (udid) {
+            try {
+                saved = localStorage.getItem(this.getPlayerStorageKey(udid)) ?? '';
+            } catch {
+                saved = '';
+            }
+        }
+        return (
+            this.getPlayerClass(saved) ??
+            this.getPlayerClass('mse') ??
+            this.getPlayerClass('webcodecs') ??
+            this.getPlayers()[0]
+        );
+    }
+
+    private static getPlayerStorageKey(udid: string): string {
+        return `configure_stream::${Util.escapeUdid(udid)}::player`;
+    }
+
+    public static savePlayerName(udid: string, playerName: string): void {
+        try {
+            localStorage.setItem(this.getPlayerStorageKey(udid), playerName);
+        } catch (error) {
+            console.warn('无法保存播放器选择', error);
+        }
     }
 
     private static getPlayerClass(playerName: string): PlayerClass | undefined {
@@ -175,7 +211,7 @@ export class StreamClientScrcpy
         }
     };
 
-    public onVideo = (data: ArrayBuffer): void => {
+    public onVideo = (data: Uint8Array): void => {
         if (!this.player) {
             return;
         }
@@ -184,14 +220,17 @@ export class StreamClientScrcpy
             this.player.play();
         }
         if (this.player.getState() === STATE.PLAYING) {
-            this.player.pushFrame(new Uint8Array(data));
+            this.player.pushFrame(data);
+            if (this.streamStatus && !this.streamStatus.hidden) {
+                this.streamStatus.hidden = true;
+            }
         }
     };
 
     public onClientsStats = (stats: ClientsStats): void => {
         this.deviceName = stats.deviceName;
         this.clientId = stats.clientId;
-        this.setTitle(`Stream ${this.deviceName}`);
+        this.setTitle(`${this.deviceName} · 云手机`);
     };
 
     public onDisplayInfo = (infoArray: DisplayCombinedInfo[]): void => {
@@ -210,6 +249,11 @@ export class StreamClientScrcpy
             this.player.play();
         }
         const { videoSettings, screenInfo } = info;
+        if (videoSettings && screenInfo) {
+            this.reportedProfile = videoSettings;
+            this.confirmProfile(videoSettings);
+            this.moreBox?.setStreamReport(videoSettings, screenInfo.videoSize);
+        }
         this.player.setDisplayInfo(info.displayInfo);
         if (typeof this.fitToScreen !== 'boolean') {
             this.fitToScreen = this.player.getFitToScreenStatus();
@@ -221,9 +265,10 @@ export class StreamClientScrcpy
                 this.player.setVideoSettings(currentSettings, this.fitToScreen, false);
             }
         }
+        const applySavedProfile = !this.joinedStream && this.applyProfileOnJoin;
         if (!videoSettings || !screenInfo) {
             this.joinedStream = true;
-            this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(currentSettings));
+            this.requestProfile(currentSettings);
             return;
         }
 
@@ -235,9 +280,11 @@ export class StreamClientScrcpy
         }
 
         if (!videoSettings.equals(currentSettings)) {
-            this.applyNewVideoSettings(videoSettings, videoSettings.equals(this.requestedVideoSettings));
+            this.applyNewVideoSettings(videoSettings);
         }
-        if (!oldInfo) {
+        if (applySavedProfile) {
+            min = currentSettings;
+        } else if (!oldInfo && !this.joinedStream) {
             const bounds = currentSettings.bounds;
             const videoSize: Size = screenInfo.videoSize;
             const onlyOneClient = this.clientsCount === 0;
@@ -252,7 +299,7 @@ export class StreamClientScrcpy
         }
         if (!min.equals(videoSettings) || !this.joinedStream) {
             this.joinedStream = true;
-            this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(min));
+            this.requestProfile(min);
         }
     };
 
@@ -267,6 +314,24 @@ export class StreamClientScrcpy
         this.filePushHandler = undefined;
         this.touchHandler?.release();
         this.touchHandler = undefined;
+        this.setHandleKeyboardEvents(false);
+        this.fullscreen?.dispose();
+        this.fullscreen = undefined;
+        clearTimeout(this.profileTimer);
+        this.moreBox?.dispose();
+        this.player?.stop();
+        if (this.streamStatus && !this.manuallyStopped) {
+            const message = document.createElement('p');
+            message.textContent = '投屏连接已断开';
+            const retry = document.createElement('button');
+            retry.textContent = '重新连接';
+            retry.onclick = () => location.reload();
+            const back = document.createElement('a');
+            back.href = location.pathname;
+            back.textContent = '返回设备列表';
+            this.streamStatus.replaceChildren(message, retry, back);
+            this.streamStatus.hidden = false;
+        }
         window.removeEventListener('resize', this.onWindowResize);
         if (this.resizeTimeoutId !== undefined) {
             clearTimeout(this.resizeTimeoutId);
@@ -279,7 +344,6 @@ export class StreamClientScrcpy
             throw Error(`Invalid udid value: "${udid}"`);
         }
 
-        this.fitToScreen = fitToScreen;
         if (!player) {
             if (typeof playerName !== 'string') {
                 throw Error('Must provide BasePlayer instance or playerName');
@@ -288,7 +352,10 @@ export class StreamClientScrcpy
             if (this.streamReceiver && videoSettings) {
                 displayInfo = this.streamReceiver.getDisplayInfo(videoSettings.displayId);
             }
-            const p = StreamClientScrcpy.createPlayer(playerName, udid, displayInfo);
+            const preferred = StreamClientScrcpy.getPreferredPlayer(udid);
+            const p =
+                StreamClientScrcpy.createPlayer(playerName, udid, displayInfo) ??
+                (preferred && new preferred(udid, displayInfo));
             if (!p) {
                 throw Error(`Unsupported player: "${playerName}"`);
             }
@@ -297,7 +364,9 @@ export class StreamClientScrcpy
             }
             player = p;
         }
+        this.fitToScreen = fitToScreen;
         this.player = player;
+        this.applyProfileOnJoin = !!videoSettings || player.hasSavedPreference();
         this.setTouchListeners(player);
 
         if (!videoSettings) {
@@ -306,6 +375,8 @@ export class StreamClientScrcpy
 
         const deviceView = document.createElement('div');
         deviceView.className = 'device-view';
+        this.fullscreen = new StreamFullscreen(deviceView, () => this.player?.getScreenInfo()?.videoSize);
+        deviceView.tabIndex = -1;
         const stop = (ev?: string | Event) => {
             if (ev && ev instanceof Event && ev.type === 'error') {
                 console.error(TAG, ev);
@@ -319,22 +390,26 @@ export class StreamClientScrcpy
             if (parent) {
                 parent.removeChild(moreBox);
             }
+            this.manuallyStopped = true;
             this.streamReceiver.stop();
-            if (this.player) {
-                this.player.stop();
-            }
+            this.onDisconnected();
+            window.location.assign(location.pathname);
         };
 
         const googMoreBox = (this.moreBox = new GoogMoreBox(udid, player, this));
         const moreBox = googMoreBox.getHolderElement();
         googMoreBox.setOnStop(stop);
-        const googToolBox = GoogToolBox.createToolBox(udid, player, this, moreBox, {
+        const googToolBox = GoogToolBox.createToolBox(udid, player, this, googMoreBox, {
             captureKeyboard: this.params.captureKeyboard,
         });
-        this.controlButtons = googToolBox.getHolderElement();
-        deviceView.appendChild(this.controlButtons);
-        const video = document.createElement('div');
+        deviceView.appendChild(googToolBox.getHolderElement());
+        const video = (this.videoViewport = document.createElement('div'));
         video.className = 'video';
+        const status = (this.streamStatus = document.createElement('div'));
+        status.className = 'stream-status';
+        status.setAttribute('role', 'status');
+        status.textContent = '正在连接手机…';
+        video.append(status);
         deviceView.appendChild(video);
         deviceView.appendChild(moreBox);
         player.setParent(video);
@@ -347,7 +422,7 @@ export class StreamClientScrcpy
                 videoSettings = StreamClientScrcpy.createVideoSettingsWithBounds(videoSettings, newBounds);
             }
         }
-        this.applyNewVideoSettings(videoSettings, false);
+        this.applyNewVideoSettings(videoSettings);
         const element = player.getTouchableElement();
         const logger = new DragAndPushLogger(element);
         this.filePushHandler = new FilePushHandler(element, new ScrcpyFilePushStream(this.streamReceiver));
@@ -379,7 +454,7 @@ export class StreamClientScrcpy
 
     private applyFitToScreenBounds = (): void => {
         this.resizeTimeoutId = undefined;
-        if (!this.player || !this.player.getFitToScreenStatus()) {
+        if (!this.player || !this.fitToScreen || this.player.getState() === BasePlayer.STATE.STOPPED) {
             return;
         }
         const newBounds = this.getMaxSize();
@@ -392,7 +467,7 @@ export class StreamClientScrcpy
         }
         const updated = StreamClientScrcpy.createVideoSettingsWithBounds(current, newBounds);
         this.player.setVideoSettings(updated, true, false);
-        this.sendNewVideoSetting(updated);
+        this.sendNewVideoSetting(updated, false);
     };
 
     public sendMessage(message: ControlMessage): void {
@@ -401,6 +476,10 @@ export class StreamClientScrcpy
 
     public getDeviceName(): string {
         return this.deviceName;
+    }
+
+    public enterFullscreen(): void {
+        void this.fullscreen?.enter();
     }
 
     public setHandleKeyboardEvents(enabled: boolean): void {
@@ -415,9 +494,37 @@ export class StreamClientScrcpy
         this.sendMessage(event);
     }
 
-    public sendNewVideoSetting(videoSettings: VideoSettings): void {
-        this.requestedVideoSettings = videoSettings;
-        this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(videoSettings));
+    public sendNewVideoSetting(videoSettings: VideoSettings, save = true): void {
+        if (save) {
+            this.player?.savePreference(videoSettings, this.fitToScreen ?? false);
+            this.requestProfile(videoSettings);
+        } else {
+            this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(videoSettings));
+        }
+    }
+
+    private requestProfile(profile: VideoSettings): void {
+        clearTimeout(this.profileTimer);
+        this.requestedProfile = profile;
+        this.moreBox?.setProfileStatus('正在等待设备确认画质设置…');
+        this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(profile));
+        if (!this.reportedProfile || !this.confirmProfile(this.reportedProfile)) {
+            this.profileTimer = setTimeout(() => {
+                this.requestedProfile = undefined;
+                this.moreBox?.setProfileStatus('设备未确认请求的码率或帧率，请查看下方设备回报。');
+            }, 5000);
+        }
+    }
+
+    private confirmProfile(profile: VideoSettings): boolean {
+        const requested = this.requestedProfile;
+        if (!requested || requested.bitrate !== profile.bitrate || requested.maxFps !== profile.maxFps) {
+            return false;
+        }
+        clearTimeout(this.profileTimer);
+        this.requestedProfile = undefined;
+        this.moreBox?.setProfileStatus('设备已确认码率和帧率设置');
+        return true;
     }
 
     public getClientId(): number {
@@ -429,13 +536,12 @@ export class StreamClientScrcpy
     }
 
     public getMaxSize(): Size | undefined {
-        if (!this.controlButtons) {
+        if (!this.videoViewport) {
             return;
         }
-        const body = document.body;
-        const width = (body.clientWidth - this.controlButtons.clientWidth) & ~15;
-        const height = body.clientHeight & ~15;
-        return new Size(width, height);
+        const width = this.videoViewport.clientWidth & ~15;
+        const height = this.videoViewport.clientHeight & ~15;
+        return width && height ? new Size(width, height) : undefined;
     }
 
     private setTouchListeners(player: BasePlayer): void {
@@ -445,16 +551,8 @@ export class StreamClientScrcpy
         this.touchHandler = new FeaturedInteractionHandler(player, this);
     }
 
-    private applyNewVideoSettings(videoSettings: VideoSettings, saveToStorage: boolean): void {
-        let fitToScreen = false;
-
-        // TODO: create control (switch/checkbox) instead
-        if (videoSettings.bounds && videoSettings.bounds.equals(this.getMaxSize())) {
-            fitToScreen = true;
-        }
-        if (this.player) {
-            this.player.setVideoSettings(videoSettings, fitToScreen, saveToStorage);
-        }
+    private applyNewVideoSettings(videoSettings: VideoSettings): void {
+        this.player?.setVideoSettings(videoSettings, this.fitToScreen ?? false, false);
     }
 
     public static createEntryForDeviceList(
@@ -479,7 +577,7 @@ export class StreamClientScrcpy
                     id="${configureButtonId}"
                     class="active action-button"
                 >
-                    Configure stream
+                    投屏设置
                 </button>
             </div>`;
             const a = e.content.getElementById(configureButtonId);

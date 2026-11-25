@@ -1,0 +1,8 @@
+{
+  "INCLUDE_GOOG": true,
+  "INCLUDE_APPL": false,
+  "INCLUDE_ADB_SHELL": false,
+  "INCLUDE_DEV_TOOLS": false,
+  "USE_BROADWAY": false,
+  "SCRCPY_LISTENS_ON_ALL_INTERFACES": false
+}

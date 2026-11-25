@@ -23,7 +23,7 @@ export type DisplayCombinedInfo = {
 };
 
 interface StreamReceiverEvents {
-    video: ArrayBuffer;
+    video: Uint8Array;
     deviceMessage: DeviceMessage;
     displayInfo: DisplayCombinedInfo[];
     clientsStats: ClientsStats;
@@ -167,7 +167,7 @@ export class StreamReceiver<P extends ParamsStream> extends ManagerClient<Params
     }
 
     public stop(): void {
-        if (this.ws && this.ws.readyState === this.ws.OPEN) {
+        if (this.ws && (this.ws.readyState === this.ws.OPEN || this.ws.readyState === this.ws.CONNECTING)) {
             this.ws.close();
         }
         this.events.length = 0;

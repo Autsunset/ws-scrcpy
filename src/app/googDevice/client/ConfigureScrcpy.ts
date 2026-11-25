@@ -15,6 +15,7 @@ import { Attribute } from '../../Attribute';
 import { StreamReceiverScrcpy } from './StreamReceiverScrcpy';
 import { ParamsStreamScrcpy } from '../../../types/ParamsStreamScrcpy';
 import { BaseClient } from '../../client/BaseClient';
+import { BitrateControl } from '../BitrateControl';
 
 interface ConfigureScrcpyEvents {
     closed: { dialog: ConfigureScrcpy; result: boolean };
@@ -31,7 +32,6 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
     private readonly TAG: string;
     private readonly udid: string;
     private readonly escapedUdid: string;
-    private readonly playerStorageKey: string;
     private deviceName: string;
     private streamReceiver?: StreamReceiverScrcpy;
     private playerName?: string;
@@ -44,6 +44,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
     private loadSettingsButton?: HTMLButtonElement;
     private saveSettingsButton?: HTMLButtonElement;
     private playerSelectElement?: HTMLSelectElement;
+    private bitrateControl?: BitrateControl;
     private displayIdSelectElement?: HTMLSelectElement;
     private encoderSelectElement?: HTMLSelectElement;
     private connectionStatusElement?: HTMLElement;
@@ -55,11 +56,10 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         super(params);
         this.udid = descriptor.udid;
         this.escapedUdid = Util.escapeUdid(this.udid);
-        this.playerStorageKey = `configure_stream::${this.escapedUdid}::player`;
         this.deviceName = descriptor['ro.product.model'];
         this.TAG = `ConfigureScrcpy[${this.udid}]`;
         this.createStreamReceiver(params);
-        this.setTitle(`${this.deviceName}. Configure stream`);
+        this.setTitle(`${this.deviceName} · 投屏设置`);
         this.background = this.createUI();
     }
 
@@ -96,7 +96,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         }
         let text = this.statusText;
         if (this.connectionCount) {
-            text = `${text}. Other clients: ${this.connectionCount}.`;
+            text = `${text} · 其他连接 ${this.connectionCount}`;
         }
         this.connectionStatusElement.innerText = text;
     }
@@ -112,7 +112,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         encoders.forEach((value) => {
             const optionElement = document.createElement('option');
             optionElement.setAttribute('value', value);
-            optionElement.innerText = value;
+            optionElement.innerText = value || '自动选择';
             select.appendChild(optionElement);
         });
         this.encoderSelectElement = select;
@@ -120,7 +120,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
 
     private onDisplayInfo = (infoArray: DisplayCombinedInfo[]): void => {
         // console.log(this.TAG, 'Received info');
-        this.statusText = 'Ready';
+        this.statusText = '设备已就绪';
         this.updateStatus();
         this.dialogContainer?.classList.add('ready');
         const select = this.displayIdSelectElement || document.createElement('select');
@@ -134,7 +134,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
             const { displayId, size } = displayInfo;
             const optionElement = document.createElement('option');
             optionElement.setAttribute('value', displayId.toString());
-            optionElement.innerText = `ID: ${displayId}; ${size.width}x${size.height}`;
+            optionElement.innerText = `屏幕 ${displayId} · ${size.width} × ${size.height}`;
             select.appendChild(optionElement);
             if (
                 (this.displayInfo && this.displayInfo.displayId === displayId) ||
@@ -145,17 +145,14 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         });
         if (selectedOptionIdx > -1) {
             select.selectedIndex = selectedOptionIdx;
-            const { videoSettings, connectionCount, displayInfo } = infoArray[selectedOptionIdx];
+            const { connectionCount, displayInfo } = infoArray[selectedOptionIdx];
             this.displayInfo = displayInfo;
-            if (connectionCount > 0 && videoSettings) {
-                // console.log(this.TAG, 'Apply other clients settings');
-                this.fillInputsFromVideoSettings(videoSettings, false);
-            } else {
-                // console.log(this.TAG, 'Apply settings for current player');
-                this.updateVideoSettingsForPlayer();
-            }
+            this.updateVideoSettingsForPlayer();
             this.connectionCount = connectionCount;
             this.updateStatus();
+            if (this.okButton) {
+                this.okButton.disabled = false;
+            }
         }
         this.displayIdSelectElement = select;
         if (this.dialogBody) {
@@ -166,16 +163,13 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
 
     private onConnected = (): void => {
         // console.log(this.TAG, 'Connected');
-        this.statusText = 'Waiting for info...';
+        this.statusText = '正在读取设备信息…';
         this.updateStatus();
-        if (this.okButton) {
-            this.okButton.disabled = false;
-        }
     };
 
     private onDisconnected = (): void => {
         // console.log(this.TAG, 'Disconnected');
-        this.statusText = 'Disconnected';
+        this.statusText = '设备已断开';
         this.updateStatus();
         if (this.okButton) {
             this.okButton.disabled = true;
@@ -235,7 +229,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         if (this.displayInfo && this.displayInfo.displayId !== videoSettings.displayId) {
             console.error(this.TAG, `Display id from VideoSettings and DisplayInfo don't match`);
         }
-        this.fillBasicInput({ id: 'bitrate' }, videoSettings);
+        this.bitrateControl?.setValue(videoSettings.bitrate);
         this.fillBasicInput({ id: 'maxFps' }, videoSettings);
         this.fillBasicInput({ id: 'iFrameInterval' }, videoSettings);
         // this.fillBasicInput({ id: 'displayId' }, videoSettings);
@@ -351,7 +345,10 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
 
     private buildVideoSettings(): VideoSettings | null {
         try {
-            const bitrate = this.getNumberValueFromInput('bitrate');
+            const bitrate = this.bitrateControl?.readValue();
+            if (bitrate === undefined) {
+                return null;
+            }
             const maxFps = this.getNumberValueFromInput('maxFps');
             const iFrameInterval = this.getNumberValueFromInput('iFrameInterval');
             const maxWidth = this.getNumberValueFromInput('maxWidth');
@@ -385,25 +382,6 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         return this.fitToScreenCheckbox.checked;
     }
 
-    private getPreviouslyUsedPlayer(): string {
-        if (!window.localStorage) {
-            return '';
-        }
-        const result = window.localStorage.getItem(this.playerStorageKey);
-        if (result) {
-            return result;
-        } else {
-            return '';
-        }
-    }
-
-    private setPreviouslyUsedPlayer(playerName: string): void {
-        if (!window.localStorage) {
-            return;
-        }
-        window.localStorage.setItem(this.playerStorageKey, playerName);
-    }
-
     private createUI(): HTMLElement {
         const dialogName = 'configureDialog';
         const blockClass = 'dialog-block';
@@ -413,7 +391,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         dialogContainer.classList.add('dialog-container', dialogName);
         const dialogHeader = document.createElement('div');
         dialogHeader.classList.add('dialog-header', dialogName, 'control-wrapper');
-        const backButton = new ToolBoxButton('Back', SvgImage.Icon.ARROW_BACK);
+        const backButton = new ToolBoxButton('关闭设置', SvgImage.Icon.ARROW_BACK);
 
         backButton.addEventListener('click', () => {
             this.cancel();
@@ -424,40 +402,45 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
 
         const deviceName = document.createElement('span');
         deviceName.classList.add('dialog-title', 'main-title');
-        deviceName.innerText = this.deviceName;
+        deviceName.innerText = '投屏设置';
         dialogHeader.appendChild(deviceName);
+        const description = document.createElement('span');
+        description.className = 'dialog-device-name';
+        description.textContent = this.deviceName;
+        dialogHeader.appendChild(description);
+        dialogContainer.setAttribute('role', 'dialog');
+        dialogContainer.setAttribute('aria-label', '投屏设置');
         const dialogBody = (this.dialogBody = document.createElement('div'));
         dialogBody.classList.add('dialog-body', blockClass, dialogName, 'hidden');
         const playerWrapper = document.createElement('div');
         playerWrapper.classList.add('controls');
         const playerLabel = document.createElement('label');
         playerLabel.classList.add('label');
-        playerLabel.innerText = 'Player:';
+        playerLabel.innerText = '播放器';
         playerWrapper.appendChild(playerLabel);
         const playerSelect = (this.playerSelectElement = document.createElement('select'));
         playerSelect.classList.add('input');
         playerSelect.id = playerLabel.htmlFor = `player_${this.escapedUdid}`;
         playerWrapper.appendChild(playerSelect);
         dialogBody.appendChild(playerWrapper);
-        const previouslyUsedPlayer = this.getPreviouslyUsedPlayer();
+        const previouslyUsedPlayer = StreamClientScrcpy.getPreferredPlayer(this.udid)?.playerFullName;
         StreamClientScrcpy.getPlayers().forEach((playerClass, index) => {
-            const { playerFullName } = playerClass;
+            const { playerFullName, playerCodeName } = playerClass;
             const optionElement = document.createElement('option');
             optionElement.setAttribute('value', playerFullName);
-            optionElement.innerText = playerFullName;
+            optionElement.innerText = playerCodeName === 'mse' ? '兼容模式（MSE）' : playerFullName;
             playerSelect.appendChild(optionElement);
             if (playerFullName === previouslyUsedPlayer) {
                 playerSelect.selectedIndex = index;
             }
         });
         playerSelect.onchange = this.onPlayerChange;
-        this.updateVideoSettingsForPlayer();
 
         const controls = document.createElement('div');
         controls.classList.add('controls', 'control-wrapper');
         const displayIdLabel = document.createElement('label');
         displayIdLabel.classList.add('label');
-        displayIdLabel.innerText = 'Display:';
+        displayIdLabel.innerText = '屏幕';
         controls.appendChild(displayIdLabel);
         if (!this.displayIdSelectElement) {
             this.displayIdSelectElement = document.createElement('select');
@@ -467,28 +450,40 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         this.displayIdSelectElement.id = displayIdLabel.htmlFor = `displayId_${this.escapedUdid}`;
         this.displayIdSelectElement.onchange = this.onDisplayIdChange;
 
+        const bitrateLabel = document.createElement('label');
+        bitrateLabel.className = 'label';
+        bitrateLabel.textContent = '视频码率（Mbps）';
+        const bitrateControl = new BitrateControl(`bitrate_${this.escapedUdid}`);
+        bitrateLabel.htmlFor = bitrateControl.input.id;
+        bitrateControl.element.classList.add('input');
+        controls.append(bitrateLabel, bitrateControl.element);
+        this.bitrateControl = bitrateControl;
         this.appendBasicInput(controls, {
-            label: 'Bitrate',
-            id: 'bitrate',
-            range: { min: 524288, max: 8388608, step: 524288, formatter: Util.prettyBytes },
-        });
-        this.appendBasicInput(controls, {
-            label: 'Max FPS',
+            label: '最高帧率',
             id: 'maxFps',
             range: { min: 1, max: 60, step: 1 },
         });
-        this.appendBasicInput(controls, { label: 'I-Frame interval', id: 'iFrameInterval' });
+        dialogBody.appendChild(controls);
+        const advanced = document.createElement('details');
+        advanced.className = 'settings-advanced';
+        const advancedTitle = document.createElement('summary');
+        advancedTitle.textContent = '高级选项';
+        const advancedControls = document.createElement('div');
+        advancedControls.classList.add('controls', 'control-wrapper');
+        advanced.append(advancedTitle, advancedControls);
+        dialogBody.appendChild(advanced);
+        this.appendBasicInput(advancedControls, { label: '关键帧间隔（秒）', id: 'iFrameInterval' });
         const fitLabel = document.createElement('label');
-        fitLabel.innerText = 'Fit to screen';
+        fitLabel.innerText = '跟随窗口编码尺寸';
         fitLabel.classList.add('label');
-        controls.appendChild(fitLabel);
+        advancedControls.appendChild(fitLabel);
         const fitToggle = new ToolBoxCheckbox(
-            'Fit to screen',
+            '跟随窗口编码尺寸',
             { off: SvgImage.Icon.TOGGLE_OFF, on: SvgImage.Icon.TOGGLE_ON },
             'fit_to_screen',
         );
         fitToggle.getAllElements().forEach((el) => {
-            controls.appendChild(el);
+            advancedControls.appendChild(el);
             if (el instanceof HTMLLabelElement) {
                 fitLabel.htmlFor = el.htmlFor;
                 el.classList.add('input');
@@ -501,41 +496,39 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
             const element = el.getElement();
             this.onFitToScreenChanged(element.checked);
         });
-        this.appendBasicInput(controls, { label: 'Max width', id: 'maxWidth' });
-        this.appendBasicInput(controls, { label: 'Max height', id: 'maxHeight' });
-        this.appendBasicInput(controls, { label: 'Codec options', id: 'codecOptions' });
+        this.appendBasicInput(advancedControls, { label: '最大宽度', id: 'maxWidth' });
+        this.appendBasicInput(advancedControls, { label: '最大高度', id: 'maxHeight' });
+        this.appendBasicInput(advancedControls, { label: '编码选项', id: 'codecOptions' });
 
         const encoderLabel = document.createElement('label');
         encoderLabel.classList.add('label');
-        encoderLabel.innerText = 'Encoder:';
-        controls.appendChild(encoderLabel);
+        encoderLabel.innerText = '编码器';
+        advancedControls.appendChild(encoderLabel);
         if (!this.encoderSelectElement) {
             this.encoderSelectElement = document.createElement('select');
         }
-        controls.appendChild(this.encoderSelectElement);
+        advancedControls.appendChild(this.encoderSelectElement);
         this.encoderSelectElement.classList.add('input');
         this.encoderSelectElement.id = encoderLabel.htmlFor = `encoderName_${this.escapedUdid}`;
 
-        dialogBody.appendChild(controls);
-
         const buttonsWrapper = document.createElement('div');
-        buttonsWrapper.classList.add('controls');
+        buttonsWrapper.className = 'settings-actions';
 
         const resetSettingsButton = (this.resetSettingsButton = document.createElement('button'));
         resetSettingsButton.classList.add('button');
-        resetSettingsButton.innerText = 'Reset settings';
+        resetSettingsButton.innerText = '恢复默认';
         resetSettingsButton.addEventListener('click', this.resetSettings);
         buttonsWrapper.appendChild(resetSettingsButton);
 
         const loadSettingsButton = (this.loadSettingsButton = document.createElement('button'));
         loadSettingsButton.classList.add('button');
-        loadSettingsButton.innerText = 'Load settings';
+        loadSettingsButton.innerText = '读取已保存';
         loadSettingsButton.addEventListener('click', this.loadSettings);
         buttonsWrapper.appendChild(loadSettingsButton);
 
         const saveSettingsButton = (this.saveSettingsButton = document.createElement('button'));
         saveSettingsButton.classList.add('button');
-        saveSettingsButton.innerText = 'Save settings';
+        saveSettingsButton.innerText = '保存';
         saveSettingsButton.addEventListener('click', this.saveSettings);
         buttonsWrapper.appendChild(saveSettingsButton);
 
@@ -545,27 +538,28 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         dialogFooter.classList.add('dialog-footer', blockClass, dialogName);
         const statusElement = document.createElement('span');
         statusElement.classList.add('subtitle');
+        statusElement.setAttribute('role', 'status');
         this.connectionStatusElement = statusElement;
         dialogFooter.appendChild(statusElement);
-        this.statusText = `Connecting...`;
+        this.statusText = '正在连接设备…';
         this.updateStatus();
 
         // const cancelButton = (this.cancelButton = document.createElement('button'));
         // cancelButton.innerText = 'Cancel';
         // cancelButton.addEventListener('click', this.cancel);
         const okButton = (this.okButton = document.createElement('button'));
-        okButton.innerText = 'Open';
+        okButton.innerText = '保存并打开';
         okButton.disabled = true;
         okButton.addEventListener('click', this.openStream);
         dialogFooter.appendChild(okButton);
         // dialogFooter.appendChild(cancelButton);
-        dialogBody.appendChild(dialogFooter);
         dialogContainer.appendChild(dialogHeader);
         dialogContainer.appendChild(dialogBody);
         dialogContainer.appendChild(dialogFooter);
         background.appendChild(dialogContainer);
         background.addEventListener('click', this.onBackgroundClick);
         document.body.appendChild(background);
+        this.updateVideoSettingsForPlayer();
         return background;
     }
 
@@ -612,6 +606,10 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         if (videoSettings && player) {
             const fitToScreen = this.getFitToScreenValue();
             player.saveVideoSettings(this.udid, videoSettings, fitToScreen, this.displayInfo);
+            StreamClientScrcpy.savePlayerName(this.udid, player.playerFullName);
+            this.tracker.refreshLinks();
+            this.statusText = '已保存，下次打开将应用';
+            this.updateStatus();
         }
     };
 
@@ -628,14 +626,25 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         if (!player) {
             return;
         }
-        this.setPreviouslyUsedPlayer(this.playerName);
+        StreamClientScrcpy.savePlayerName(this.udid, this.playerName);
         // return;
-        player.setVideoSettings(videoSettings, fitToScreen, false);
+        player.setVideoSettings(videoSettings, fitToScreen, true);
         const params: ParamsStreamScrcpy = {
             ...this.params,
             udid: this.udid,
             fitToScreen,
         };
+        const streamUrl = new URL(location.href);
+        const query = new URLSearchParams({
+            action: params.action,
+            udid: params.udid,
+            ws: params.ws,
+            player: player.getName(),
+            fitToScreen: String(fitToScreen),
+            captureKeyboard: String(params.captureKeyboard ?? false),
+        });
+        streamUrl.hash = `!${query}`;
+        history.replaceState(null, '', streamUrl);
         StreamClientScrcpy.start(params, this.streamReceiver, player, fitToScreen, videoSettings);
         this.streamReceiver.triggerInitialInfoEvents();
     };

@@ -10,10 +10,14 @@ interface QualityStats {
     droppedFrames: number;
 }
 
-type Block = {
-    start: number;
-    end: number;
-};
+const BUFFER_CHECK_INTERVAL_MS = 100;
+const CATCH_UP_THRESHOLD = 0.35;
+const NORMAL_PLAYBACK_THRESHOLD = 0.2;
+const HARD_SEEK_THRESHOLD = 1.5;
+const LIVE_EDGE_MARGIN = 0.15;
+const STALL_TIMEOUT_MS = 750;
+const SEEK_COOLDOWN_MS = 1000;
+const KEEP_BEHIND_SECONDS = 20;
 
 export class MsePlayer extends BasePlayer {
     public static readonly storageKeyPrefix = 'MseDecoder';
@@ -21,19 +25,20 @@ export class MsePlayer extends BasePlayer {
     public static readonly playerCodeName = 'mse';
     public static readonly preferredVideoSettings: VideoSettings = new VideoSettings({
         lockedVideoOrientation: -1,
-        bitrate: 7340032,
-        maxFps: 60,
-        iFrameInterval: 10,
-        bounds: new Size(720, 720),
+        bitrate: 8_000_000,
+        maxFps: 30,
+        iFrameInterval: 2,
+        bounds: new Size(1280, 1280),
         sendFrameMeta: false,
     });
     private static DEFAULT_FRAMES_PER_FRAGMENT = 1;
-    private static DEFAULT_FRAMES_PER_SECOND = 60;
+    private static DEFAULT_FRAMES_PER_SECOND = 30;
 
     public static createElement(id?: string): HTMLVideoElement {
         const tag = document.createElement('video') as HTMLVideoElement;
         tag.muted = true;
         tag.autoplay = true;
+        tag.playsInline = true;
         tag.setAttribute('muted', 'muted');
         tag.setAttribute('autoplay', 'autoplay');
         if (typeof id === 'string') {
@@ -45,27 +50,14 @@ export class MsePlayer extends BasePlayer {
 
     private converter?: VideoConverter;
     private videoStats: QualityStats[] = [];
-    private noDecodedFramesSince = -1;
-    private currentTimeNotChangedSince = -1;
-    private bigBufferSince = -1;
-    private aheadOfBufferSince = -1;
     public fpf: number = MsePlayer.DEFAULT_FRAMES_PER_FRAGMENT;
     public readonly supportsScreenshot = true;
     private sourceBuffer?: SourceBuffer;
-    private waitUntilSegmentRemoved = false;
-    private blocks: Block[] = [];
-    private frames: Uint8Array[] = [];
-    private jumpEnd = -1;
-    private lastTime = -1;
-    protected canPlay = false;
-    private seekingSince = -1;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    protected readonly isSafari = !!(window as unknown as any)['safari'];
-    protected readonly isChrome = navigator.userAgent.includes('Chrome');
-    protected readonly isMac = navigator.platform.startsWith('Mac');
-    private MAX_TIME_TO_RECOVER = 200; // ms
-    private MAX_BUFFER = this.isSafari ? 2 : this.isChrome && this.isMac ? 0.9 : 0.2;
-    private MAX_AHEAD = -0.2;
+    private prunePoints: number[] = [];
+    private nextBufferCheck = 0;
+    private lastPosition = -1;
+    private lastProgressAt = 0;
+    private lastSeekAt = -Infinity;
 
     public static isSupported(): boolean {
         return typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(mimeType);
@@ -83,7 +75,7 @@ export class MsePlayer extends BasePlayer {
             return false;
         };
         tag.addEventListener('error', this.onVideoError);
-        tag.addEventListener('canplay', this.onVideoCanPlay);
+        tag.addEventListener('canplay', this.onCanPlay);
         // eslint-disable-next-line @typescript-eslint/no-empty-function
         setLogger(() => {}, console.error);
     }
@@ -92,8 +84,19 @@ export class MsePlayer extends BasePlayer {
         console.error(`[${this.name}]`, event);
     };
 
-    onVideoCanPlay = (): void => {
-        this.onCanPlayHandler();
+    private onCanPlay = (): void => {
+        if (!this.converter || this.getState() !== BasePlayer.STATE.PLAYING) {
+            return;
+        }
+        this.watchSourceBuffer();
+        this.checkVideoResize();
+        if (this.tag.paused) {
+            void this.tag.play().catch((error: Error) => {
+                if (error.name !== 'AbortError') {
+                    console.warn(`[${this.name}]`, error.message);
+                }
+            });
+        }
     };
 
     private static createConverter(
@@ -131,13 +134,6 @@ export class MsePlayer extends BasePlayer {
         return null;
     }
 
-    protected onCanPlayHandler(): void {
-        this.canPlay = true;
-        this.tag.play();
-        this.tag.removeEventListener('canplay', this.onVideoCanPlay);
-        this.checkVideoResize();
-    }
-
     protected calculateMomentumStats(): void {
         const stat = this.getVideoPlaybackQuality();
         if (!stat) {
@@ -150,9 +146,6 @@ export class MsePlayer extends BasePlayer {
 
         while (this.videoStats.length && this.videoStats[0].timestamp < oneSecondBefore) {
             this.videoStats.shift();
-        }
-        while (this.inputBytes.length && this.inputBytes[0].timestamp < oneSecondBefore) {
-            this.inputBytes.shift();
         }
         let inputBytes = 0;
         this.inputBytes.forEach((item) => {
@@ -202,10 +195,8 @@ export class MsePlayer extends BasePlayer {
                 fps = this.videoSettings.maxFps;
             }
             this.converter = MsePlayer.createConverter(this.tag, fps, this.fpf);
-            this.canPlay = false;
             this.resetStats();
         }
-        this.converter.play();
     }
 
     public pause(): void {
@@ -219,18 +210,14 @@ export class MsePlayer extends BasePlayer {
     }
 
     public setVideoSettings(videoSettings: VideoSettings, fitToScreen: boolean, saveToStorage: boolean): void {
-        if (this.videoSettings && this.videoSettings.maxFps !== videoSettings.maxFps) {
-            const state = this.getState();
-            if (this.converter) {
-                this.stop();
-                this.converter = MsePlayer.createConverter(this.tag, videoSettings.maxFps, this.fpf);
-                this.canPlay = false;
-            }
-            if (state === BasePlayer.STATE.PLAYING) {
-                this.play();
-            }
+        const restart = this.converter && this.videoSettings.maxFps !== videoSettings.maxFps;
+        if (restart) {
+            this.stopConverter();
         }
         super.setVideoSettings(videoSettings, fitToScreen, saveToStorage);
+        if (restart && this.getState() === BasePlayer.STATE.PLAYING) {
+            this.play();
+        }
     }
 
     public getPreferredVideoSetting(): VideoSettings {
@@ -242,202 +229,129 @@ export class MsePlayer extends BasePlayer {
             return;
         }
         const { videoHeight, videoWidth } = this.tag;
-        if (this.videoHeight !== videoHeight || this.videoWidth !== videoWidth) {
+        if (videoWidth && videoHeight && (this.videoHeight !== videoHeight || this.videoWidth !== videoWidth)) {
             this.calculateScreenInfoForBounds(videoWidth, videoHeight);
         }
     };
-    cleanSourceBuffer = (): void => {
-        if (!this.sourceBuffer) {
+    private watchSourceBuffer(): void {
+        const sourceBuffer = this.converter?.sourceBuffer;
+        if (sourceBuffer && this.sourceBuffer !== sourceBuffer) {
+            this.sourceBuffer?.removeEventListener('updateend', this.onBufferUpdated);
+            this.sourceBuffer = sourceBuffer;
+            sourceBuffer.addEventListener('updateend', this.onBufferUpdated);
+        }
+    }
+
+    private onBufferUpdated = (): void => {
+        this.pruneBuffer(this.tag.currentTime);
+        const now = performance.now();
+        if (now < this.nextBufferCheck) {
             return;
         }
-        if (this.sourceBuffer.updating) {
+        this.nextBufferCheck = now + BUFFER_CHECK_INTERVAL_MS;
+        this.checkVideoResize();
+        const { buffered, currentTime, seeking, paused, readyState } = this.tag;
+        if (!buffered.length || seeking) {
             return;
         }
-        if (this.blocks.length < 10) {
+        const latestRange = buffered.length - 1;
+        const start = buffered.start(latestRange);
+        const end = buffered.end(latestRange);
+        const delay = end - currentTime;
+        if (currentTime !== this.lastPosition || paused || delay <= NORMAL_PLAYBACK_THRESHOLD) {
+            this.lastPosition = currentTime;
+            this.lastProgressAt = now;
+        }
+        const stalled = !paused && now - this.lastProgressAt >= STALL_TIMEOUT_MS;
+        const target = Math.max(start, end - LIVE_EDGE_MARGIN);
+        if (
+            readyState >= HTMLMediaElement.HAVE_METADATA &&
+            (delay > HARD_SEEK_THRESHOLD || stalled) &&
+            target > currentTime + LIVE_EDGE_MARGIN &&
+            now - this.lastSeekAt >= SEEK_COOLDOWN_MS
+        ) {
+            this.tag.playbackRate = 1;
+            this.tag.currentTime = target;
+            this.lastSeekAt = this.lastProgressAt = now;
             return;
         }
-        try {
-            this.sourceBuffer.removeEventListener('updateend', this.cleanSourceBuffer);
-            this.waitUntilSegmentRemoved = false;
-            const removeStart = this.blocks[0].start;
-            const removeEnd = this.blocks[4].end;
-            this.blocks = this.blocks.slice(5);
-            this.sourceBuffer.remove(removeStart, removeEnd);
-            let frame = this.frames.shift();
-            while (frame) {
-                if (!this.checkForIFrame(frame)) {
-                    this.frames.unshift(frame);
-                    break;
-                }
-                frame = this.frames.shift();
-            }
-        } catch (error: any) {
-            console.error(`[${this.name}]`, 'Failed to clean source buffer');
+        if (delay <= NORMAL_PLAYBACK_THRESHOLD && this.tag.playbackRate !== 1) {
+            this.tag.playbackRate = 1;
+        } else if (!paused && delay > CATCH_UP_THRESHOLD && this.tag.playbackRate === 1) {
+            this.tag.playbackRate = 1.15;
         }
     };
 
-    jumpToEnd = (): void => {
-        if (!this.sourceBuffer) {
+    private pruneBuffer(position: number): void {
+        const sourceBuffer = this.sourceBuffer;
+        const cutoff = position - KEEP_BEHIND_SECONDS;
+        const firstPoint = this.prunePoints[0];
+        if (firstPoint === undefined || firstPoint > cutoff) {
             return;
         }
-        if (this.sourceBuffer.updating) {
+        if (!sourceBuffer || sourceBuffer.updating || this.tag.error) {
             return;
         }
-        if (!this.tag.buffered.length) {
+        const { buffered } = this.tag;
+        if (!buffered.length) {
             return;
         }
-        const end = this.tag.buffered.end(this.tag.seekable.length - 1);
-        console.log(`[${this.name}]`, `Jumping to the end (${this.jumpEnd}, ${end - this.jumpEnd}).`);
-        this.tag.currentTime = end;
-        this.jumpEnd = -1;
-        this.sourceBuffer.removeEventListener('updateend', this.jumpToEnd);
-    };
+        const bufferStart = buffered.start(0);
+        let pruneEnd = bufferStart;
+        while (this.prunePoints.length && this.prunePoints[0] <= cutoff) {
+            pruneEnd = Math.max(pruneEnd, this.prunePoints[0]);
+            this.prunePoints.shift();
+        }
+        if (pruneEnd > bufferStart) {
+            sourceBuffer.remove(bufferStart, pruneEnd);
+        }
+    }
 
     public pushFrame(frame: Uint8Array): void {
-        super.pushFrame(frame);
-        if (!this.checkForIFrame(frame)) {
-            this.frames.push(frame);
-        } else {
-            this.checkForBadState();
-        }
-    }
-
-    protected checkForBadState(): void {
-        // Workaround for stalled playback (`stalled` event is not fired, but the image freezes)
-        const { currentTime } = this.tag;
-        const now = Date.now();
-        // let reasonToJump = '';
-        let hasReasonToJump = false;
-        if (this.momentumQualityStats) {
-            if (this.momentumQualityStats.decodedFrames === 0 && this.momentumQualityStats.inputFrames > 0) {
-                if (this.noDecodedFramesSince === -1) {
-                    this.noDecodedFramesSince = now;
-                } else {
-                    const time = now - this.noDecodedFramesSince;
-                    if (time > this.MAX_TIME_TO_RECOVER) {
-                        // reasonToJump = `No frames decoded for ${time} ms.`;
-                        hasReasonToJump = true;
-                    }
-                }
-            } else {
-                this.noDecodedFramesSince = -1;
-            }
-        }
-        if (currentTime === this.lastTime && this.currentTimeNotChangedSince === -1) {
-            this.currentTimeNotChangedSince = now;
-        } else {
-            this.currentTimeNotChangedSince = -1;
-        }
-        this.lastTime = currentTime;
-        if (this.tag.buffered.length) {
-            const end = this.tag.buffered.end(0);
-            const buffered = end - currentTime;
-
-            if ((end | 0) - currentTime > this.MAX_BUFFER) {
-                if (this.bigBufferSince === -1) {
-                    this.bigBufferSince = now;
-                } else {
-                    const time = now - this.bigBufferSince;
-                    if (time > this.MAX_TIME_TO_RECOVER) {
-                        // reasonToJump = `Buffer is bigger then ${this.MAX_BUFFER} (${buffered.toFixed(
-                        //     3,
-                        // )}) for ${time} ms.`;
-                        hasReasonToJump = true;
-                    }
-                }
-            } else {
-                this.bigBufferSince = -1;
-            }
-            if (buffered < this.MAX_AHEAD) {
-                if (this.aheadOfBufferSince === -1) {
-                    this.aheadOfBufferSince = now;
-                } else {
-                    const time = now - this.aheadOfBufferSince;
-                    if (time > this.MAX_TIME_TO_RECOVER) {
-                        // reasonToJump = `Current time is ahead of end (${buffered}) for ${time} ms.`;
-                        hasReasonToJump = true;
-                    }
-                }
-            } else {
-                this.aheadOfBufferSince = -1;
-            }
-            if (this.currentTimeNotChangedSince !== -1) {
-                const time = now - this.currentTimeNotChangedSince;
-                if (time > this.MAX_TIME_TO_RECOVER) {
-                    // reasonToJump = `Current time not changed for ${time} ms.`;
-                    hasReasonToJump = true;
-                }
-            }
-            if (!hasReasonToJump) {
-                return;
-            }
-            let waitingForSeekEnd = 0;
-            if (this.seekingSince !== -1) {
-                waitingForSeekEnd = now - this.seekingSince;
-                if (waitingForSeekEnd < 1500) {
-                    return;
-                }
-            }
-            // console.info(`${reasonToJump} Jumping to the end. ${waitingForSeekEnd}`);
-
-            const onSeekEnd = () => {
-                this.seekingSince = -1;
-                this.tag.removeEventListener('seeked', onSeekEnd);
-                this.tag.play();
-            };
-            if (this.seekingSince !== -1) {
-                console.warn(`[${this.name}]`, `Attempt to seek while already seeking! ${waitingForSeekEnd}`);
-            }
-            this.seekingSince = now;
-            this.tag.addEventListener('seeked', onSeekEnd);
-            this.tag.currentTime = this.tag.buffered.end(0);
-        }
-    }
-
-    protected checkForIFrame(frame: Uint8Array): boolean {
         if (!this.converter) {
-            return false;
+            return;
         }
-        this.sourceBuffer = this.converter.sourceBuffer;
+        super.pushFrame(frame);
+        this.watchSourceBuffer();
         if (BasePlayer.isIFrame(frame)) {
-            let start = 0;
-            let end = 0;
-            if (this.tag.buffered && this.tag.buffered.length) {
-                start = this.tag.buffered.start(0);
-                end = this.tag.buffered.end(0);
-            }
-            if (end !== 0 && start < end) {
-                const block: Block = {
-                    start,
-                    end,
-                };
-                this.blocks.push(block);
-                if (this.blocks.length > 10) {
-                    this.waitUntilSegmentRemoved = true;
-
-                    this.sourceBuffer.addEventListener('updateend', this.cleanSourceBuffer);
-                    this.converter.appendRawData(frame);
-                    return true;
+            const { buffered } = this.tag;
+            if (buffered.length) {
+                const end = buffered.end(buffered.length - 1);
+                if (end > (this.prunePoints[this.prunePoints.length - 1] ?? 0)) {
+                    this.prunePoints.push(end);
                 }
             }
-            if (this.sourceBuffer) {
-                this.sourceBuffer.onupdateend = this.checkVideoResize;
-            }
         }
-        if (this.waitUntilSegmentRemoved) {
-            return false;
-        }
-
         this.converter.appendRawData(frame);
-        return true;
     }
 
     private stopConverter(): void {
-        if (this.converter) {
-            this.converter.appendRawData(new Uint8Array([]));
-            this.converter.pause();
-            delete this.converter;
+        if (!this.converter) {
+            return;
         }
+        this.sourceBuffer?.removeEventListener('updateend', this.onBufferUpdated);
+        this.converter = this.sourceBuffer = undefined;
+        this.prunePoints = [];
+        this.nextBufferCheck = this.lastProgressAt = 0;
+        this.lastPosition = -1;
+        this.lastSeekAt = -Infinity;
+        this.tag.pause();
+        this.tag.playbackRate = 1;
+        const src = this.tag.getAttribute('src');
+        this.tag.removeAttribute('src');
+        this.tag.load();
+        if (src?.startsWith('blob:')) {
+            URL.revokeObjectURL(src);
+        }
+    }
+
+    protected getAdditionalQualityStats(): string[] {
+        const { buffered, currentTime } = this.tag;
+        if (!buffered.length) {
+            return [];
+        }
+        const ahead = Math.max(0, buffered.end(buffered.length - 1) - currentTime);
+        return [`Buffered ahead: ${Math.round(ahead * 1000)} ms`];
     }
 
     public getFitToScreenStatus(): boolean {

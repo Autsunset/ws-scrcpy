@@ -3,6 +3,8 @@ import { AdbUtils } from '../AdbUtils';
 import WS from 'ws';
 import { RequestParameters } from '../../mw/Mw';
 import { ACTION } from '../../../common/Action';
+import { SERVER_PORT } from '../../../common/Constants';
+import { SessionAuth } from '../../services/SessionAuth';
 
 export class WebsocketProxyOverAdb extends WebsocketProxy {
     public static processRequest(ws: WS, params: RequestParameters): WebsocketProxy | undefined {
@@ -33,6 +35,10 @@ export class WebsocketProxyOverAdb extends WebsocketProxy {
         }
         if (typeof remote !== 'string' || !remote) {
             ws.close(4003, `[${this.TAG}] Invalid value "${remote}" for "remote" parameter`);
+            return;
+        }
+        if (SessionAuth.getInstance().enabled && (remote !== `tcp:${SERVER_PORT}` || (path && path !== '/'))) {
+            ws.close(1008, 'Only the scrcpy stream is allowed');
             return;
         }
         if (typeof udid !== 'string' || !udid) {

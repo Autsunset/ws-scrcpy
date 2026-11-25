@@ -15,6 +15,8 @@ import { ParamsDeviceTracker } from '../../../types/ParamsDeviceTracker';
 import { HostItem } from '../../../types/Configuration';
 import { ChannelCode } from '../../../common/ChannelCode';
 import { Tool } from '../../client/Tool';
+import { createFloatingLink } from '../FloatingStream';
+import { isAppMode } from '../../Pwa';
 
 type Field = keyof GoogDeviceDescriptor | ((descriptor: GoogDeviceDescriptor) => string);
 type DescriptionColumn = { title: string; field: Field };
@@ -99,6 +101,7 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
             }
         }
         const action = ACTION.STREAM_SCRCPY;
+        const preferred = StreamClientScrcpy.getPreferredPlayer(udid);
         playerTds.forEach((item) => {
             item.innerHTML = '';
             const playerFullName = item.getAttribute(DeviceTracker.AttributePlayerFullName);
@@ -106,19 +109,41 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
             if (!playerFullName || !playerCodeName) {
                 return;
             }
+            const code = decodeURIComponent(playerCodeName);
+            const primary = code === preferred?.playerCodeName;
             const link = DeviceTracker.buildLink(
                 {
                     action,
                     udid,
-                    player: decodeURIComponent(playerCodeName),
+                    player: code,
                     ws: url,
-                    fitToScreen: true,
                 },
-                decodeURIComponent(playerFullName),
+                primary ? '打开手机' : decodeURIComponent(playerFullName),
                 this.params,
             );
+            if (primary) {
+                link.classList.add('primary-stream');
+            }
+            if (
+                (isAppMode() || matchMedia('(pointer: coarse)').matches) &&
+                new URL(link.href).origin === location.origin
+            ) {
+                link.target = '_self';
+                link.search = `?${new URLSearchParams({ stream: '1' })}`;
+            }
             item.appendChild(link);
+            if (primary && new URL(link.href).origin === location.origin) {
+                const compactUrl = new URL(link.href);
+                const compactParams = new URLSearchParams(compactUrl.hash.slice(2));
+                compactParams.set('fitToScreen', 'false');
+                compactUrl.hash = `!${compactParams}`;
+                item.appendChild(createFloatingLink(compactUrl, true));
+            }
         });
+    }
+
+    public refreshLinks(): void {
+        this.buildDeviceTable();
     }
 
     onActionButtonClick = (event: MouseEvent): void => {
@@ -163,7 +188,7 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
         const optionElement = document.createElement('option');
         optionElement.setAttribute(Attribute.URL, url);
         optionElement.setAttribute(Attribute.NAME, name);
-        optionElement.innerText = `proxy over adb`;
+        optionElement.innerText = 'ADB 代理';
         return optionElement;
     }
 
@@ -177,17 +202,19 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
         const blockClass = 'desc-block';
         const fullName = `${this.id}_${Util.escapeUdid(device.udid)}`;
         const isActive = device.state === DeviceState.DEVICE;
+        const manufacturer = device['ro.product.manufacturer'] || '';
+        const model = device['ro.product.model'] || 'Android';
         let hasPid = false;
         const servicesId = `device_services_${fullName}`;
         const row = html`<div class="device ${isActive ? 'active' : 'not-active'}">
             <div class="device-header">
-                <div class="device-name">${device['ro.product.manufacturer']} ${device['ro.product.model']}</div>
+                <div class="device-name">${manufacturer} ${model}</div>
                 <div class="device-serial">${device.udid}</div>
                 <div class="device-version">
                     <div class="release-version">${device['ro.build.version.release']}</div>
                     <div class="sdk-version">${device['ro.build.version.sdk']}</div>
                 </div>
-                <div class="device-state" title="State: ${device.state}"></div>
+                <div class="device-state" title="State: ${device.state}">${isActive ? '在线' : '离线'}</div>
             </div>
             <div id="${servicesId}" class="services"></div>
         </div>`.content;
@@ -236,11 +263,11 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
                     actionButton.onclick = this.onActionButtonClick;
                     if (hasPid) {
                         command = ControlCenterCommand.KILL_SERVER;
-                        actionButton.title = 'Kill server';
+                        actionButton.title = '停止投屏服务';
                         actionButton.appendChild(SvgImage.create(SvgImage.Icon.CANCEL));
                     } else {
                         command = ControlCenterCommand.START_SERVER;
-                        actionButton.title = 'Start server';
+                        actionButton.title = '启动投屏服务';
                         actionButton.appendChild(SvgImage.create(SvgImage.Icon.REFRESH));
                     }
                     actionButton.setAttribute(Attribute.COMMAND, command);
@@ -248,9 +275,9 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
                     const timestamp = device['last.update.timestamp'];
                     if (timestamp) {
                         const date = new Date(timestamp);
-                        actionButton.title = `Last update on ${date.toLocaleDateString()} at ${date.toLocaleTimeString()}`;
+                        actionButton.title = `最后更新：${date.toLocaleString()}`;
                     } else {
-                        actionButton.title = `Not active`;
+                        actionButton.title = '设备离线';
                     }
                     actionButton.appendChild(SvgImage.create(SvgImage.Icon.OFFLINE));
                 }
@@ -307,7 +334,7 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
                     selectElement.appendChild(adbProxyOption);
                     const actionButton = document.createElement('button');
                     actionButton.className = 'action-button update-interfaces-button active';
-                    actionButton.title = `Update information`;
+                    actionButton.title = '刷新设备信息';
                     actionButton.appendChild(SvgImage.create(SvgImage.Icon.REFRESH));
                     actionButton.setAttribute(Attribute.UDID, device.udid);
                     actionButton.setAttribute(Attribute.COMMAND, ControlCenterCommand.UPDATE_INTERFACES);

@@ -1,0 +1,10 @@
+.git
+.idea
+.appium-home
+.env*
+.secrets
+build
+dist
+logs
+node_modules
+*.log

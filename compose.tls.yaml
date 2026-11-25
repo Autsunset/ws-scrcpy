@@ -1,0 +1,20 @@
+services:
+  ws-scrcpy:
+    environment:
+      WS_SCRCPY_CONFIG: /run/secrets/ws_scrcpy_tls_config.yaml
+      NODE_EXTRA_CA_CERTS: /run/secrets/ws_scrcpy_tls_cert
+    secrets:
+      - source: ws_scrcpy_tls_config
+        target: ws_scrcpy_tls_config.yaml
+      - ws_scrcpy_tls_cert
+      - ws_scrcpy_tls_key
+    healthcheck:
+      test: ['CMD', 'node', '-e', 'fetch("https://127.0.0.1:8000/healthz").then(response => process.exit(response.status === 204 ? 0 : 1)).catch(() => process.exit(1))']
+
+secrets:
+  ws_scrcpy_tls_config:
+    file: ./docker/tls.yaml
+  ws_scrcpy_tls_cert:
+    file: ${WS_SCRCPY_TLS_CERT_PATH:-./.secrets/tls.crt}
+  ws_scrcpy_tls_key:
+    file: ${WS_SCRCPY_TLS_KEY_PATH:-./.secrets/tls.key}

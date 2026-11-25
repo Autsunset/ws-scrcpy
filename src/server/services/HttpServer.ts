@@ -8,6 +8,8 @@ import { Config } from '../Config';
 import { TypedEmitter } from '../../common/TypedEmitter';
 import * as process from 'process';
 import { EnvName } from '../EnvName';
+import { SessionAuth } from './SessionAuth';
+import { PWA_ASSETS } from '../../common/PwaAssets';
 
 const DEFAULT_STATIC_DIR = path.join(__dirname, './public');
 
@@ -75,16 +77,31 @@ export class HttpServer extends TypedEmitter<HttpServerEvents> implements Servic
     }
 
     public async start(): Promise<void> {
+        const auth = SessionAuth.getInstance();
+        const base = PATHNAME.replace(/\/?$/, '/');
         this.mainApp = express();
+        this.mainApp.disable('x-powered-by');
+        const app = express.Router();
         if (HttpServer.SERVE_STATIC && HttpServer.PUBLIC_DIR) {
-            this.mainApp.use(PATHNAME, express.static(HttpServer.PUBLIC_DIR));
+            for (const asset of PWA_ASSETS) {
+                app.get(`/${asset}`, (_request, response) => {
+                    response.set('Cache-Control', 'no-cache');
+                    response.set('X-Content-Type-Options', 'nosniff');
+                    response.sendFile(asset, { root: HttpServer.PUBLIC_DIR });
+                });
+            }
+        }
+        app.use(auth.router(base));
+        if (HttpServer.SERVE_STATIC && HttpServer.PUBLIC_DIR) {
+            app.use(express.static(HttpServer.PUBLIC_DIR));
 
             /// #if USE_WDA_MJPEG_SERVER
 
             const { MjpegProxyFactory } = await import('../mw/MjpegProxyFactory');
-            this.mainApp.get('/mjpeg/:udid', new MjpegProxyFactory().proxyRequest);
+            app.get('/mjpeg/:udid', new MjpegProxyFactory().proxyRequest);
             /// #endif
         }
+        this.mainApp.use(PATHNAME, app);
         const config = Config.getInstance();
         config.servers.forEach((serverItem) => {
             const { secure, port, redirectToSecure } = serverItem;

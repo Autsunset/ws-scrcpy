@@ -39,6 +39,8 @@ npm install
 npm start
 ```
 
+For the Android-only container, see [Docker deployment for Redroid](docs/docker-redroid.md).
+
 ## Supported features
 
 ### Android
@@ -240,11 +242,12 @@ launch issue, not a build error — see [Remote control](#remote-control).
 
 ## Security warning
 Be advised and keep in mind:
-* There is no encryption between browser and node.js server (you can [configure](#run-configuration) HTTPS).
-* There is no encryption between browser and WebSocket server on android device.
-* There is no authorization on any level.
-* The modified version of scrcpy with integrated WebSocket server is listening
-for connections on all network interfaces (see [custom build](#custom-build)).
+* Legacy builds started without authentication are not safe to expose. The
+  [Docker deployment](docs/docker-redroid.md) requires login and defaults to
+  publishing the web port on the host loopback only.
+* Use HTTPS for remote browser access and keep Android's ADB and scrcpy ports private.
+* Legacy builds may allow a browser to connect directly to the unencrypted
+  WebSocket server on Android (see [custom build](#custom-build)).
 * The modified version of scrcpy will keep running after the last client
 disconnected.
 

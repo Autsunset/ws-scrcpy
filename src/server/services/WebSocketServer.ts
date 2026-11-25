@@ -1,8 +1,10 @@
 import { Server as WSServer } from 'ws';
 import WS from 'ws';
+import { IncomingMessage } from 'http';
 import { Service } from './Service';
 import { HttpServer, ServerAndPort } from './HttpServer';
 import { MwFactory } from '../mw/Mw';
+import { SessionAuth } from './SessionAuth';
 
 export class WebSocketServer implements Service {
     private static instance?: WebSocketServer;
@@ -31,8 +33,15 @@ export class WebSocketServer implements Service {
     public attachToServer(item: ServerAndPort): WSServer {
         const { server, port } = item;
         const TAG = `WebSocket Server {tcp:${port}}`;
-        const wss = new WSServer({ server });
+        const auth = SessionAuth.getInstance();
+        const wss = new WSServer({
+            server,
+            verifyClient: ({ req }: { req: IncomingMessage }) => auth.allowsUpgrade(req),
+        });
         wss.on('connection', async (ws: WS, request) => {
+            if (!auth.trackSocket(request, ws)) {
+                return;
+            }
             if (!request.url) {
                 ws.close(4001, `[${TAG}] Invalid url`);
                 return;

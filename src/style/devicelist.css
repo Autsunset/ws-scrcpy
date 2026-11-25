@@ -1,19 +1,9 @@
 :root {
-    --device-border-color: hsl(0, 0%, 82%);
-    --device-list-stripe-color: hsl(0, 0%, 96%);
-    --device-list-default-color: hsl(0, 0%, 100%);
-    --device-list-hover-color: hsl(218, 67%, 95%);
+    --device-border-color: var(--border-color);
+    --device-list-stripe-color: var(--surface-bg-color);
+    --device-list-default-color: var(--surface-bg-color);
+    --device-list-hover-color: var(--surface-elevated-color);
 }
-
-@media (prefers-color-scheme: dark) {
-    :root {
-        --device-border-color: hsl(0, 0%, 32%);
-        --device-list-stripe-color: hsl(0, 0%, 16%);
-        --device-list-default-color: hsl(0, 0%, 14%);
-        --device-list-hover-color: hsl(218, 17%, 18%);
-    }
-}
-
 
 body.list {
     height: auto;
@@ -30,7 +20,7 @@ body.list {
 
 body.stream #devices {
     background-color: var(--device-list-default-color);
-    opacity: .8;
+    opacity: 0.92;
     position: absolute;
     top: 0;
     left: 0;
@@ -51,14 +41,14 @@ body.list #device_list_menu {
 
 #devices .device-list button {
     font-size: var(--font-size);
-    color: var(--button-text-color);
+    color: var(--text-color);
 }
 
-#devices .device-list div.device:nth-child(2n+1){
+#devices .device-list div.device:nth-child(2n+1) {
     background-color: var(--device-list-default-color);
 }
 
-#devices .device-list div.device:nth-child(2n){
+#devices .device-list div.device:nth-child(2n) {
     background-color: var(--device-list-stripe-color);
 }
 
@@ -68,45 +58,84 @@ body.list #device_list_menu {
 
 #devices .device-header div {
     display: inline-flex;
+    align-items: center;
 }
 
 #devices .device-name {
-    font-size: 120%;
+    font-size: 1.15rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    color: var(--text-color);
 }
 
 #devices .device-model {
-    font-size: 110%;
+    font-size: 1.05rem;
 }
 
 #devices .device-serial {
-    color: var(--url-color);
-    font-size: 80%;
-    margin-left: 6px;
+    font-family: var(--font-mono);
+    color: var(--text-color-light);
+    background: var(--surface-muted-color);
+    padding: 0.16rem 0.55rem;
+    border-radius: 0.45rem;
+    font-size: 0.8rem;
 }
 
 #devices .device-version {
-    font-size: 100%;
-    margin-left: 6px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-color-light);
+    background: var(--surface-muted-color);
+    padding: 0.16rem 0.55rem;
+    border-radius: 0.45rem;
     align-items: baseline;
+    gap: 0.35rem;
+}
+
+#devices .device-version .release-version::before {
+    content: 'Android ';
+    opacity: 0.7;
 }
 
 #devices .device-version .sdk-version {
-    font-size: 75%;
-    color: var(--url-color);
-    margin-left: 0.2em;
+    font-size: 0.75rem;
+    color: var(--text-color-light);
+    opacity: 0.8;
+}
+
+#devices .device-version .sdk-version::before {
+    content: 'API ';
 }
 
 #devices .device-state {
-    border-radius: 25px;
-    background-color: red;
-    font-size: 80%;
-    margin-left: 6px;
-    width: 1em;
-    height: 1em;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: rgba(225, 29, 72, 0.12);
+    color: #e11d48;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.2rem 0.65rem;
+    margin-left: auto;
+}
+
+@media (prefers-color-scheme: dark) {
+    #devices .device-state {
+        background: rgba(251, 113, 133, 0.14);
+        color: #fda4af;
+    }
 }
 
 #devices .device.active .device-state {
-    background-color: green;
+    background: rgba(16, 185, 129, 0.14);
+    color: #059669;
+}
+
+@media (prefers-color-scheme: dark) {
+    #devices .device.active .device-state {
+        background: rgba(16, 185, 129, 0.16);
+        color: #34d399;
+    }
 }
 
 #devices .device-list {
@@ -114,37 +143,32 @@ body.list #device_list_menu {
     bottom: 0;
     left: 0;
     width: 100%;
-}
-
-#devices .device-list {
     border-spacing: 0;
     border-collapse: collapse;
-    font-family: monospace;
+    font-family: var(--font-sans);
     font-size: var(--font-size);
 }
 
 #devices .device-list div.device {
-    padding: 5px 20px 5px;
-}
-
-#devices .device-list div.device:hover {
-    background-color: var(--device-list-hover-color)
+    padding: 0.75rem 1.25rem;
 }
 
 #devices .device-list div.device select {
     color: var(--text-color);
-    background-color: var(--main-bg-color);
+    background-color: transparent;
     margin-left: 0;
     border: none;
-}
-
-#devices .device-list div.device:hover select {
-    background-color: var(--device-list-hover-color);;
+    font: inherit;
+    font-size: 0.875rem;
+    padding: 0.42rem 0.65rem;
+    cursor: pointer;
+    outline: none;
 }
 
 #devices .device-list div.desc-block {
-    margin: .3em;
+    margin: 0;
     display: inline-flex;
+    align-items: center;
 }
 
 #devices .device-list div.desc-block.hidden {
@@ -154,22 +178,67 @@ body.list #device_list_menu {
 #devices .device-list div.desc-block.stream,
 #devices .device-list div.desc-block.server_pid,
 #devices .device-list div.desc-block.net_interface {
-    border: 1px solid var(--device-border-color);
-    border-radius: .3em;
+    border: 1px solid var(--border-color);
+    border-radius: 0.6rem;
+    background: var(--surface-muted-color);
     overflow: hidden;
     white-space: nowrap;
+    min-height: 2.25rem;
+}
+
+#devices .device-list div.desc-block.stream {
+    background: transparent;
+    border-color: transparent;
+    gap: 0.45rem;
+    flex-wrap: wrap;
+    overflow: visible;
+}
+
+#devices .device-list div.desc-block.stream > a,
+#devices .device-list div.desc-block.stream > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.25rem;
+    box-sizing: border-box;
+    border-radius: 0.6rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+#devices .device-list div.desc-block.stream > a:not(.primary-stream):not(.floating-stream) {
+    padding: 0.42rem 0.75rem;
+    border: 1px solid var(--border-color);
+    background: var(--surface-bg-color);
+    color: var(--text-color);
+}
+
+#devices .device-list div.desc-block.stream > a:not(.primary-stream):not(.floating-stream):hover {
+    background: var(--surface-muted-color);
+    border-color: var(--border-strong-color);
 }
 
 #devices .device-list div.device div.desc-block.stream button.action-button {
-    color: var(--button-text-color);
+    padding: 0.42rem 0.8rem;
+    border: 1px solid var(--border-color);
+    background: var(--surface-bg-color);
+    color: var(--text-color);
+}
+
+#devices .device-list div.device div.desc-block.stream button.action-button:hover {
+    background: var(--surface-muted-color);
+    border-color: var(--border-strong-color);
+    color: var(--text-color);
 }
 
 #devices .device-list div.desc-block button {
-    fill: var(--text-color)
+    fill: var(--text-color);
 }
 
 #devices .device-list div.desc-block button > span {
-    padding: 0 .5em;
+    padding: 0 0.45em;
 }
 
 #devices .device-list div.desc-block button > span,
@@ -196,6 +265,7 @@ body.list #device_list_menu {
 
 #devices .device-list .device.not-active {
     color: var(--text-color-light);
+    opacity: 0.72;
 }
 
 #devices .device-list .device.not-active a {
@@ -207,29 +277,216 @@ body.list #device_list_menu {
 }
 
 #devices .device-list div.device div.desc-block .action-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.7rem;
     border: none;
-    background-color: rgba(0, 0, 0, 0);
+    background-color: transparent;
     color: inherit;
+    font-size: 0.85rem;
 }
 
 #devices .device-list div.device div.desc-block .action-button.update-interfaces-button {
     margin-right: 0;
+    border-left: 1px solid var(--border-color);
 }
 
 #devices .device-list div.device div.desc-block .action-button.active {
     cursor: pointer;
 }
 
-#devices .device-list .device.active div.desc-block .action-button:hover {
+#devices .device-list .device.active div.desc-block.server_pid .action-button:hover,
+#devices .device-list .device.active div.desc-block.net_interface .action-button:hover {
     color: var(--kill-button-hover-color);
+    background: rgba(225, 29, 72, 0.08);
 }
 
-#devices .device-list .device.active div.desc-block button.action-button:hover > svg > path {
+#devices .device-list .device.active div.desc-block.server_pid button.action-button:hover > svg > path,
+#devices .device-list .device.active div.desc-block.net_interface button.action-button:hover > svg > path {
     fill: var(--kill-button-hover-color);
 }
 
 #devices .tracker-name {
-    padding: 5px 20px 5px;
-    font-size: larger;
-    font-weight: bolder;
+    padding: 0 0 0.5rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-color-light);
+}
+
+body.dashboard {
+    min-height: 100%;
+    height: auto;
+    overflow: auto;
+    font: 1rem/1.5 var(--font-sans);
+    background: var(--main-bg-color);
+}
+
+.dashboard-header,
+body.dashboard #devices {
+    box-sizing: border-box;
+    width: min(100%, 64rem);
+    height: auto;
+    margin: auto;
+    padding: 1.25rem clamp(1rem, 4vw, 2.5rem);
+}
+
+.dashboard-header {
+    position: relative;
+    padding-top: max(2rem, calc(1.25rem + env(safe-area-inset-top)));
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.dashboard-header h1 {
+    margin: 0 0 0.35rem;
+    font-size: clamp(1.65rem, 3.2vw, 2.1rem);
+    font-weight: 750;
+    letter-spacing: -0.03em;
+    color: var(--text-color);
+}
+
+.dashboard-header p {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-color-light);
+}
+
+.dashboard-header .logout-link {
+    position: absolute;
+    top: max(2rem, calc(1.25rem + env(safe-area-inset-top)));
+    inset-inline-end: clamp(1rem, 4vw, 2.5rem);
+}
+
+body:not(.dashboard) .dashboard-header {
+    display: none;
+}
+
+body.dashboard #devices .device-list,
+body.dashboard #devices .device-list button {
+    font-family: inherit;
+}
+
+body.dashboard #devices .device-list .device {
+    margin: 0.9rem 0;
+    padding: 1.15rem 1.25rem;
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    background: var(--surface-bg-color);
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+body.dashboard #devices .device-list .device:hover {
+    border-color: var(--border-strong-color);
+    box-shadow: var(--shadow-md);
+}
+
+body.dashboard #devices .device-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.65rem;
+    margin-bottom: 0.9rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+body.dashboard #devices .services {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+body.dashboard #devices .device-state::before {
+    content: '';
+    align-self: center;
+    margin-inline-end: 0.4rem;
+    width: 0.48rem;
+    height: 0.48rem;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+body.dashboard #devices .device.active .device-state::before {
+    background: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.22);
+}
+
+#devices .primary-stream,
+#devices .primary-stream:visited {
+    border: 1px solid transparent;
+    border-radius: 0.6rem;
+    padding: 0.45rem 1rem;
+    color: var(--accent-text-color);
+    background: var(--accent-color);
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+    text-decoration: none;
+}
+
+#devices .primary-stream:hover {
+    background: var(--accent-hover-color);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.36);
+}
+
+#devices .floating-stream,
+#devices .floating-stream:visited {
+    margin-inline-start: 0;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 0.6rem;
+    padding: 0.42rem 0.85rem;
+    background: var(--surface-bg-color);
+    color: var(--text-color);
+    font-weight: 500;
+    text-decoration: none;
+}
+
+#devices .floating-stream:hover {
+    background: var(--surface-muted-color);
+    border-color: var(--text-color-light);
+}
+
+.install-guide {
+    margin-top: 0.85rem;
+    display: inline-block;
+    color: var(--link-color);
+}
+
+.install-guide summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    background: var(--accent-soft-color);
+    color: var(--link-color);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    list-style: none;
+    transition: background-color 0.15s ease;
+}
+
+.install-guide summary::-webkit-details-marker {
+    display: none;
+}
+
+.install-guide summary:hover {
+    background: rgba(59, 130, 246, 0.24);
+}
+
+.install-guide p {
+    max-width: 38rem;
+    margin-top: 0.6rem;
+    padding: 0.65rem 0.9rem;
+    border-radius: 0.65rem;
+    border: 1px solid var(--border-color);
+    background: var(--surface-bg-color);
+    color: var(--text-color-light);
+    font-size: 0.86rem;
 }

@@ -52,6 +52,7 @@ export interface PlayerClass {
 export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
     private static readonly STAT_BACKGROUND: string = 'rgba(0, 0, 0, 0.5)';
     private static readonly STAT_TEXT_COLOR: string = 'hsl(24, 85%, 50%)';
+    private static readonly QUALITY_SAMPLE_INTERVAL_MS = 250;
     public static readonly DEFAULT_SHOW_QUALITY_STATS = false;
     public static STATE: Record<string, number> = {
         PLAYING: 1,
@@ -77,7 +78,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
     private totalStatsCounter = 0;
     private dirtyStatsWidth = 0;
     private state: number = BasePlayer.STATE.STOPPED;
-    private qualityAnimationId?: number;
+    private qualityTimer?: number;
     private showQualityStats = BasePlayer.DEFAULT_SHOW_QUALITY_STATS;
     protected receivedFirstFrame = false;
     private statLines: string[] = [];
@@ -169,38 +170,58 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         return frame && frame.length > 4 && (frame[4] & 31) === 5;
     }
 
-    private static getStorageKey(storageKeyPrefix: string, udid: string): string {
+    private static getLegacyStorageKey(storageKeyPrefix: string, udid: string): string {
         const { innerHeight, innerWidth } = window;
         return `${storageKeyPrefix}:${udid}:${innerWidth}x${innerHeight}`;
     }
 
-    private static getFullStorageKey(storageKeyPrefix: string, udid: string, displayInfo?: DisplayInfo): string {
-        const { innerHeight, innerWidth } = window;
-        let base = `${storageKeyPrefix}:${udid}:${innerWidth}x${innerHeight}`;
-        if (displayInfo) {
-            const { displayId, size } = displayInfo;
-            base = `${base}:${displayId}:${size.width}x${size.height}`;
-        }
-        return base;
+    private static getPreferenceKey(prefix: string, udid: string, displayId = DisplayInfo.DEFAULT_DISPLAY): string {
+        return `ws-scrcpy:video:${prefix}:${udid}:${displayId}`;
     }
 
     public static getFromStorageCompat(prefix: string, udid: string, displayInfo?: DisplayInfo): string | null {
-        const shortKey = this.getStorageKey(prefix, udid);
-        const savedInShort = window.localStorage.getItem(shortKey);
-        if (!displayInfo) {
-            return savedInShort;
-        }
-        const isDefaultDisplay = displayInfo.displayId === DisplayInfo.DEFAULT_DISPLAY;
-        const fullKey = this.getFullStorageKey(prefix, udid, displayInfo);
-        const savedInFull = window.localStorage.getItem(fullKey);
-        if (savedInFull) {
-            if (savedInShort && isDefaultDisplay) {
-                window.localStorage.removeItem(shortKey);
+        const displayId = displayInfo?.displayId ?? DisplayInfo.DEFAULT_DISPLAY;
+        return this.readPreference(prefix, udid, displayId);
+    }
+
+    private static readPreference(prefix: string, udid: string, displayId: number, suffix = ''): string | null {
+        try {
+            const storage = window.localStorage;
+            const key = this.getPreferenceKey(prefix, udid, displayId) + suffix;
+            const saved = storage.getItem(key);
+            if (saved !== null) {
+                return saved;
             }
-            return savedInFull;
-        }
-        if (isDefaultDisplay) {
-            return savedInShort;
+            const legacyKey = this.getLegacyStorageKey(prefix, udid);
+            const matches = (candidate: string, base: string): boolean => {
+                const parts = candidate.slice(base.length).split(':');
+                return candidate.startsWith(`${base}:`) && parts[1] === String(displayId) && /^\d+x\d+$/.test(parts[2]);
+            };
+            const candidates = Object.keys(storage).filter((candidate) => candidate.startsWith(`${prefix}:${udid}:`));
+            const legacy = candidates
+                .filter((candidate) => (suffix ? candidate.endsWith(suffix) : !candidate.endsWith(':fit')))
+                .sort((first, second) => Number(second.startsWith(legacyKey)) - Number(first.startsWith(legacyKey)))
+                .find((candidate) => {
+                    const tail = candidate.slice(`${prefix}:${udid}:`.length);
+                    const dimensions = tail.split(':')[0];
+                    if (!/^\d+x\d+$/.test(dimensions)) {
+                        return false;
+                    }
+                    const plain = `${prefix}:${udid}:${dimensions}`;
+                    return (
+                        matches(candidate, plain) ||
+                        (displayId === DisplayInfo.DEFAULT_DISPLAY && candidate === plain + suffix)
+                    );
+                });
+            if (legacy) {
+                const value = storage.getItem(legacy);
+                if (value !== null) {
+                    storage.setItem(key, value);
+                }
+                return value;
+            }
+        } catch (error) {
+            console.warn('无法读取本地画质设置', error);
         }
         return null;
     }
@@ -210,21 +231,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         udid: string,
         displayInfo?: DisplayInfo,
     ): boolean {
-        if (!window.localStorage) {
-            return false;
-        }
-        let parsedValue = false;
-        const key = `${this.getFullStorageKey(storageKeyPrefix, udid, displayInfo)}:fit`;
-        const saved = window.localStorage.getItem(key);
-        if (!saved) {
-            return false;
-        }
-        try {
-            parsedValue = JSON.parse(saved);
-        } catch (error: any) {
-            console.error(`[${this.name}]`, 'Failed to parse', saved);
-        }
-        return parsedValue;
+        return this.readPreference(storageKeyPrefix, udid, displayInfo?.displayId ?? 0, ':fit') === 'true';
     }
 
     public static getVideoSettingFromStorage(
@@ -233,14 +240,19 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         udid: string,
         displayInfo?: DisplayInfo,
     ): VideoSettings {
-        if (!window.localStorage) {
-            return preferred;
-        }
         const saved = this.getFromStorageCompat(storageKeyPrefix, udid, displayInfo);
         if (!saved) {
             return preferred;
         }
-        const parsed = JSON.parse(saved);
+        let parsed;
+        try {
+            parsed = JSON.parse(saved);
+        } catch {
+            return preferred;
+        }
+        if (!parsed || typeof parsed !== 'object') {
+            return preferred;
+        }
         const {
             displayId,
             crop,
@@ -256,7 +268,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         const maxFps = isNaN(parsed.maxFps) ? parsed.frameRate : parsed.maxFps;
         // REMOVE `maxSize`
         let bounds: Size | null = null;
-        if (typeof parsed.bounds !== 'object' || isNaN(parsed.bounds.width) || isNaN(parsed.bounds.height)) {
+        if (!parsed.bounds || !Number.isFinite(parsed.bounds.width) || !Number.isFinite(parsed.bounds.height)) {
             if (!isNaN(parsed.maxSize)) {
                 bounds = new Size(parsed.maxSize, parsed.maxSize);
             }
@@ -266,9 +278,9 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         return new VideoSettings({
             displayId: typeof displayId === 'number' ? displayId : 0,
             crop: crop ? new Rect(crop.left, crop.top, crop.right, crop.bottom) : preferred.crop,
-            bitrate: !isNaN(bitrate) ? bitrate : preferred.bitrate,
+            bitrate: Number.isSafeInteger(bitrate) && bitrate > 0 ? bitrate : preferred.bitrate,
             bounds: bounds !== null ? bounds : preferred.bounds,
-            maxFps: !isNaN(maxFps) ? maxFps : preferred.maxFps,
+            maxFps: Number.isSafeInteger(maxFps) && maxFps > 0 ? maxFps : preferred.maxFps,
             iFrameInterval: !isNaN(iFrameInterval) ? iFrameInterval : preferred.iFrameInterval,
             sendFrameMeta: typeof sendFrameMeta === 'boolean' ? sendFrameMeta : preferred.sendFrameMeta,
             lockedVideoOrientation: !isNaN(lockedVideoOrientation)
@@ -286,13 +298,14 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         fitToScreen: boolean,
         displayInfo?: DisplayInfo,
     ): void {
-        if (!window.localStorage) {
-            return;
+        try {
+            const displayId = displayInfo?.displayId ?? videoSettings.displayId;
+            const key = this.getPreferenceKey(storageKeyPrefix, udid, displayId);
+            window.localStorage.setItem(key, JSON.stringify(videoSettings));
+            window.localStorage.setItem(`${key}:fit`, JSON.stringify(fitToScreen));
+        } catch (error) {
+            console.warn('无法保存本地画质设置', error);
         }
-        const key = this.getFullStorageKey(storageKeyPrefix, udid, displayInfo);
-        window.localStorage.setItem(key, JSON.stringify(videoSettings));
-        const fitKey = `${key}:fit`;
-        window.localStorage.setItem(fitKey, JSON.stringify(fitToScreen));
     }
 
     public abstract getImageDataURL(): string;
@@ -317,6 +330,10 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
 
     public stop(): void {
         this.state = BasePlayer.STATE.STOPPED;
+        if (this.qualityTimer !== undefined) {
+            window.clearTimeout(this.qualityTimer);
+            this.qualityTimer = undefined;
+        }
     }
 
     public getState(): number {
@@ -324,16 +341,14 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
     }
 
     public pushFrame(frame: Uint8Array): void {
-        if (!this.receivedFirstFrame) {
-            this.receivedFirstFrame = true;
-            if (typeof this.qualityAnimationId !== 'number') {
-                this.qualityAnimationId = requestAnimationFrame(this.updateQualityStats);
-            }
-        }
+        this.receivedFirstFrame = true;
         this.inputBytes.push({
             timestamp: Date.now(),
             bytes: frame.byteLength,
         });
+        if (this.qualityTimer === undefined && this.state !== BasePlayer.STATE.STOPPED) {
+            this.scheduleQualitySample();
+        }
     }
 
     public abstract getPreferredVideoSetting(): VideoSettings;
@@ -343,7 +358,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         return this.touchableCanvas;
     }
 
-    public getParent(): HTMLElement | undefined{
+    public getParent(): HTMLElement | undefined {
         return this.parentElement;
     }
 
@@ -364,16 +379,23 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
     public setVideoSettings(videoSettings: VideoSettings, fitToScreen: boolean, saveToStorage: boolean): void {
         this.videoSettings = videoSettings;
         if (saveToStorage) {
-            BasePlayer.putVideoSettingsToStorage(
-                this.storageKeyPrefix,
-                this.udid,
-                videoSettings,
-                fitToScreen,
-                this.displayInfo,
-            );
+            this.savePreference(videoSettings, fitToScreen);
         }
         this.resetStats();
         this.emit('video-settings', VideoSettings.copy(videoSettings));
+    }
+
+    public savePreference(videoSettings: VideoSettings, fitToScreen: boolean): void {
+        BasePlayer.putVideoSettingsToStorage(this.storageKeyPrefix, this.udid, videoSettings, fitToScreen);
+    }
+
+    public hasSavedPreference(): boolean {
+        return BasePlayer.getFromStorageCompat(this.storageKeyPrefix, this.udid, this.displayInfo) !== null;
+    }
+
+    public getReceivedMbps(): number | undefined {
+        const bytes = this.momentumQualityStats?.inputBytes;
+        return bytes === undefined ? undefined : (bytes * 8) / 1_000_000;
     }
 
     public getScreenInfo(): ScreenInfo | undefined {
@@ -399,6 +421,8 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
 
     protected resetStats(): void {
         this.receivedFirstFrame = false;
+        this.inputBytes = [];
+        this.momentumQualityStats = undefined;
         this.totalStatsCounter = 0;
         this.totalStats = {
             droppedFrames: 0,
@@ -415,9 +439,20 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         };
     }
 
+    private scheduleQualitySample(): void {
+        this.qualityTimer = window.setTimeout(this.updateQualityStats, BasePlayer.QUALITY_SAMPLE_INTERVAL_MS);
+    }
+
     private updateQualityStats = (): void => {
+        this.qualityTimer = undefined;
+        if (this.state !== BasePlayer.STATE.STOPPED) {
+            this.scheduleQualitySample();
+        }
         const now = Date.now();
         const oneSecondBefore = now - 1000;
+        while (this.inputBytes.length && this.inputBytes[0].timestamp < oneSecondBefore) {
+            this.inputBytes.shift();
+        }
         this.calculateMomentumStats();
         if (!this.momentumQualityStats) {
             return;
@@ -442,10 +477,11 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
             this.totalStatsCounter++;
         }
         this.drawStats();
-        if (this.state !== BasePlayer.STATE.STOPPED) {
-            this.qualityAnimationId = requestAnimationFrame(this.updateQualityStats);
-        }
     };
+
+    protected getAdditionalQualityStats(): string[] {
+        return [];
+    }
 
     private drawStats(): void {
         if (!this.showQualityStats) {
@@ -475,6 +511,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         } else {
             newStats.push(`Not supported`);
         }
+        newStats.push(...this.getAdditionalQualityStats());
         let changed = this.statLines.length !== newStats.length;
         let i = 0;
         while (!changed && i++ < newStats.length) {

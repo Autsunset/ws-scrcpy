@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "云手机 · ws-scrcpy",
+  "short_name": "云手机",
+  "description": "连接并操控自己的 Android 云手机",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#101724",
+  "theme_color": "#101724",
+  "icons": [
+    { "src": "pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "pwa/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

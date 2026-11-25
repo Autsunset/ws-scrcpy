@@ -1,0 +1,6 @@
+server:
+  - secure: true
+    port: 8000
+    options:
+      certPath: /run/secrets/ws_scrcpy_tls_cert
+      keyPath: /run/secrets/ws_scrcpy_tls_key
