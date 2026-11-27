@@ -8,6 +8,7 @@ services:
     environment:
       WS_SCRCPY_ADB_TARGET: ${REDROID_ADB_TARGET:-redroid:5555}
       WS_SCRCPY_AUTH_ORIGIN: ${WS_SCRCPY_AUTH_ORIGIN:-http://localhost:8080}
+      WS_SCRCPY_AUTH_EXTRA_ORIGINS: ${WS_SCRCPY_AUTH_EXTRA_ORIGINS:-}
       WS_SCRCPY_PASSWORD_FILE: /run/secrets/ws_scrcpy_password
     secrets:
       - ws_scrcpy_password
@@ -15,6 +16,7 @@ services:
       - '${WS_SCRCPY_BIND_IP:-127.0.0.1}:${WS_SCRCPY_HTTP_PORT:-8080}:8000'
     volumes:
       - adb-keys:/home/node/.android
+      - auth-sessions:/home/node/.ws-scrcpy
     networks:
       - default
       - redroid
@@ -34,6 +36,7 @@ secrets:
 
 volumes:
   adb-keys:
+  auth-sessions:
 
 networks:
   redroid:

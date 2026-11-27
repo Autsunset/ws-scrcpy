@@ -10,6 +10,7 @@ import * as process from 'process';
 import { EnvName } from '../EnvName';
 import { SessionAuth } from './SessionAuth';
 import { PWA_ASSETS } from '../../common/PwaAssets';
+import { DeviceReadiness } from '../../common/DeviceReadiness';
 
 const DEFAULT_STATIC_DIR = path.join(__dirname, './public');
 
@@ -28,6 +29,7 @@ export class HttpServer extends TypedEmitter<HttpServerEvents> implements Servic
     private static instance: HttpServer;
     private static PUBLIC_DIR = DEFAULT_STATIC_DIR;
     private static SERVE_STATIC = true;
+    private static deviceReadiness?: () => Promise<DeviceReadiness>;
     private servers: ServerAndPort[] = [];
     private mainApp?: Express;
     private started = false;
@@ -45,6 +47,10 @@ export class HttpServer extends TypedEmitter<HttpServerEvents> implements Servic
 
     public static hasInstance(): boolean {
         return !!this.instance;
+    }
+
+    public static setDeviceReadiness(check: () => Promise<DeviceReadiness>): void {
+        this.deviceReadiness = check;
     }
 
     public static setPublicDir(dir: string): void {
@@ -92,6 +98,19 @@ export class HttpServer extends TypedEmitter<HttpServerEvents> implements Servic
             }
         }
         app.use(auth.router(base));
+        app.get('/readyz', async (_request, response, next) => {
+            response.set('Cache-Control', 'no-store');
+            if (!HttpServer.deviceReadiness) {
+                response.sendStatus(404);
+                return;
+            }
+            try {
+                const status = await HttpServer.deviceReadiness();
+                response.status(status === 'ready' ? 200 : 503).json({ status });
+            } catch (error) {
+                next(error);
+            }
+        });
         if (HttpServer.SERVE_STATIC && HttpServer.PUBLIC_DIR) {
             app.use(express.static(HttpServer.PUBLIC_DIR));
 

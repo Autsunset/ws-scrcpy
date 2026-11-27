@@ -9,6 +9,7 @@ export class StreamFullscreen {
     private readonly hint = document.createElement('p');
     private active = false;
     private locked = false;
+    private idleTimer?: number;
 
     constructor(private readonly view: HTMLElement, private readonly videoSize: () => Size | undefined) {
         this.exit.className = 'immersive-exit';
@@ -20,6 +21,8 @@ export class StreamFullscreen {
         this.view.append(this.exit, this.hint);
         document.addEventListener('fullscreenchange', this.onFullscreenChange);
         document.addEventListener('keydown', this.onKeyDown, true);
+        this.view.addEventListener('pointermove', this.bumpIdle);
+        this.view.addEventListener('pointerdown', this.bumpIdle);
     }
 
     public async enter(): Promise<void> {
@@ -57,10 +60,27 @@ export class StreamFullscreen {
         }
     }
 
+    private bumpIdle = (): void => {
+        if (!this.active) {
+            return;
+        }
+        this.view.classList.remove('immersive-idle');
+        window.clearTimeout(this.idleTimer);
+        this.idleTimer = window.setTimeout(() => {
+            if (this.active) {
+                this.view.classList.add('immersive-idle');
+            }
+        }, 2600);
+    };
+
     private setActive(active: boolean): void {
         this.active = active;
         this.view.classList.toggle('immersive-stream', active);
-        if (!active) {
+        window.clearTimeout(this.idleTimer);
+        if (active) {
+            this.bumpIdle();
+        } else {
+            this.view.classList.remove('immersive-idle');
             this.hint.textContent = '';
             if (this.locked) {
                 screen.orientation.unlock();
@@ -83,8 +103,11 @@ export class StreamFullscreen {
     };
 
     public dispose(): void {
+        window.clearTimeout(this.idleTimer);
         document.removeEventListener('fullscreenchange', this.onFullscreenChange);
         document.removeEventListener('keydown', this.onKeyDown, true);
+        this.view.removeEventListener('pointermove', this.bumpIdle);
+        this.view.removeEventListener('pointerdown', this.bumpIdle);
         void this.leave();
     }
 }

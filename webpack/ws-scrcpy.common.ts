@@ -19,7 +19,7 @@ const buildConfigDefinePlugin = new webpack.DefinePlugin({
     '__PATHNAME__': JSON.stringify(buildConfigOptions.PATHNAME),
 });
 
-export const common = () => {
+export const common = (frontend = false) => {
     return {
         module: {
             rules: [
@@ -30,7 +30,12 @@ export const common = () => {
                 {
                     test: /\.tsx?$/,
                     use: [
-                        { loader: 'ts-loader' },
+                        {
+                            loader: 'ts-loader',
+                            options: frontend
+                                ? { compilerOptions: { module: 'esnext', moduleResolution: 'node' } }
+                                : undefined,
+                        },
                         {
                             loader: 'ifdef-loader',
                             options: buildConfigOptions,
@@ -137,7 +142,7 @@ const front: webpack.Configuration = {
 };
 
 export const frontend = () => {
-    return Object.assign({}, common(), front);
+    return Object.assign({}, common(true), front);
 };
 
 const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON).toString());

@@ -61,7 +61,7 @@ export class ScrcpyServer {
         });
     }
 
-    public static async getServerPid(device: Device): Promise<number[] | undefined> {
+    public static async getServerPid(device: Device, removeOlderVersion = true): Promise<number[] | undefined> {
         if (!device.isConnected()) {
             return;
         }
@@ -87,7 +87,7 @@ export class ScrcpyServer {
                 const versionString = args[1];
                 if (versionString === SERVER_VERSION) {
                     serverPid.push(pid);
-                } else {
+                } else if (removeOlderVersion) {
                     const currentVersion = new ServerVersion(versionString);
                     if (currentVersion.isCompatible()) {
                         const desired = new ServerVersion(SERVER_VERSION);

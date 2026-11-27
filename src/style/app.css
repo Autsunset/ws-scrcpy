@@ -1,45 +1,45 @@
 :root {
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-    --main-bg-color: #f4f6f9;
+    --main-bg-color: #fafafa;
     --surface-bg-color: #ffffff;
     --surface-elevated-color: #ffffff;
-    --surface-muted-color: #eef2f7;
-    --stream-bg-color: #0b111e;
-    --shell-bg-color: #090d16;
+    --surface-muted-color: #f5f5f5;
+    --stream-bg-color: #000000;
+    --shell-bg-color: #000000;
     --text-shadow-color: transparent;
-    --header-bg-color: #f8fafc;
+    --header-bg-color: #ffffff;
     --controls-bg-color: rgba(255, 255, 255, 0.92);
     --control-buttons-bg-color: #ffffff;
 
-    --text-color: #0f172a;
-    --text-color-light: #64748b;
-    --border-color: #e2e8f0;
-    --border-strong-color: #cbd5e1;
+    --text-color: #171717;
+    --text-color-light: #666666;
+    --border-color: #ebebeb;
+    --border-strong-color: #d4d4d4;
 
-    --accent-color: #2563eb;
-    --accent-hover-color: #1d4ed8;
-    --accent-soft-color: rgba(37, 99, 235, 0.12);
+    --accent-color: #171717;
+    --accent-hover-color: #333333;
+    --accent-soft-color: rgba(23, 23, 23, 0.08);
     --accent-text-color: #ffffff;
 
-    --link-color: #2563eb;
-    --link-color-light: #60a5fa;
-    --link-color_visited: #4f46e5;
-    --link-color_visited-light: #818cf8;
+    --link-color: #0070f3;
+    --link-color-light: #3291ff;
+    --link-color_visited: #0761d1;
+    --link-color_visited-light: #3291ff;
 
-    --svg-checkbox-bg-color: #2563eb;
-    --svg-button-fill: #475569;
-    --kill-button-hover-color: #e11d48;
-    --url-color: #64748b;
-    --button-text-color: #2563eb;
-    --button-border-color: #cbd5e1;
-    --progress-background-color: rgba(37, 99, 235, 0.15);
-    --progress-background-error-color: rgba(225, 29, 72, 0.15);
+    --svg-checkbox-bg-color: #171717;
+    --svg-button-fill: #4d4d4d;
+    --kill-button-hover-color: #ee0000;
+    --url-color: #888888;
+    --button-text-color: #171717;
+    --button-border-color: #d4d4d4;
+    --progress-background-color: rgba(0, 112, 243, 0.14);
+    --progress-background-error-color: rgba(238, 0, 0, 0.14);
 
-    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-    --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
-    --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.18);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12);
 
     --font-size: 14px;
     --panel-width: 3.5rem;
@@ -47,46 +47,46 @@
 
 @media (prefers-color-scheme: dark) {
     :root {
-        --main-bg-color: #0b111e;
-        --surface-bg-color: #131c2e;
-        --surface-elevated-color: #182238;
-        --surface-muted-color: #1e293b;
-        --stream-bg-color: #070b14;
-        --shell-bg-color: #05080f;
+        --main-bg-color: #000000;
+        --surface-bg-color: #0a0a0a;
+        --surface-elevated-color: #111111;
+        --surface-muted-color: #171717;
+        --stream-bg-color: #000000;
+        --shell-bg-color: #000000;
         --text-shadow-color: transparent;
-        --header-bg-color: #0f172a;
-        --controls-bg-color: rgba(19, 28, 46, 0.92);
-        --control-buttons-bg-color: #11192b;
+        --header-bg-color: #0a0a0a;
+        --controls-bg-color: rgba(10, 10, 10, 0.9);
+        --control-buttons-bg-color: #0a0a0a;
 
-        --text-color: #f1f5f9;
-        --text-color-light: #94a3b8;
-        --border-color: rgba(148, 163, 184, 0.16);
-        --border-strong-color: rgba(148, 163, 184, 0.28);
+        --text-color: #ededed;
+        --text-color-light: #888888;
+        --border-color: #262626;
+        --border-strong-color: #3d3d3d;
 
-        --accent-color: #3b82f6;
-        --accent-hover-color: #60a5fa;
-        --accent-soft-color: rgba(59, 130, 246, 0.18);
-        --accent-text-color: #ffffff;
+        --accent-color: #ededed;
+        --accent-hover-color: #ffffff;
+        --accent-soft-color: rgba(255, 255, 255, 0.1);
+        --accent-text-color: #0a0a0a;
 
-        --link-color: #60a5fa;
-        --link-color-light: #3b82f6;
-        --link-color_visited: #818cf8;
-        --link-color_visited-light: #6366f1;
+        --link-color: #3291ff;
+        --link-color-light: #52a8ff;
+        --link-color_visited: #3291ff;
+        --link-color_visited-light: #52a8ff;
 
-        --svg-checkbox-bg-color: #3b82f6;
-        --svg-button-fill: #cbd5e1;
-        --kill-button-hover-color: #fb7185;
-        --url-color: #94a3b8;
-        --device-list-stripe-color: #131c2e;
-        --device-list-default-color: #131c2e;
-        --button-text-color: #60a5fa;
-        --button-border-color: rgba(148, 163, 184, 0.25);
-        --progress-background-color: rgba(59, 130, 246, 0.2);
-        --progress-background-error-color: rgba(251, 113, 133, 0.2);
+        --svg-checkbox-bg-color: #ededed;
+        --svg-button-fill: #a1a1a1;
+        --kill-button-hover-color: #ff4d4d;
+        --url-color: #888888;
+        --device-list-stripe-color: #0a0a0a;
+        --device-list-default-color: #0a0a0a;
+        --button-text-color: #ededed;
+        --button-border-color: #333333;
+        --progress-background-color: rgba(50, 145, 255, 0.18);
+        --progress-background-error-color: rgba(255, 77, 77, 0.18);
 
-        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-        --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.35);
-        --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+        --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+        --shadow-lg: 0 20px 56px rgba(0, 0, 0, 0.78);
     }
 }
 
@@ -114,6 +114,12 @@ body {
     height: 100%;
     width: 100%;
     overflow: hidden;
+    caret-color: transparent;
+}
+
+input,
+textarea {
+    caret-color: auto;
 }
 
 body.shell {
@@ -158,6 +164,11 @@ body.stream {
     width: 100%;
     height: 100%;
     object-fit: contain;
+    transition: filter 0.2s ease;
+}
+
+.device-view.eink-mode .video-layer {
+    filter: grayscale(100%) contrast(0.96) brightness(0.9);
 }
 
 .touch-layer {
@@ -172,7 +183,7 @@ body.stream {
 .video {
     flex-grow: 1;
     position: relative;
-    background-color: #05080f;
+    background: #000000;
     width: 100%;
     height: 100%;
     min-width: 0;
@@ -181,7 +192,9 @@ body.stream {
 
 .control-buttons-list {
     width: var(--panel-width);
-    background-color: var(--control-buttons-bg-color);
+    background-color: var(--controls-bg-color);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-left: 1px solid var(--border-color);
     flex-shrink: 0;
     display: flex;
@@ -191,7 +204,27 @@ body.stream {
     padding: 0.5rem 0;
     box-sizing: border-box;
     overflow-y: auto;
+    scrollbar-width: thin;
     z-index: 10;
+}
+
+@media (pointer: fine) {
+    body.stream:not(.compact-stream) .device-view {
+        position: relative;
+    }
+
+    body.stream:not(.compact-stream) .control-buttons-list {
+        position: absolute;
+        right: 0.9rem;
+        top: 50%;
+        transform: translateY(-50%);
+        height: auto;
+        max-height: calc(100dvh - 2rem);
+        padding: 0.45rem 0;
+        border: 1px solid var(--border-strong-color);
+        border-radius: 4px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+    }
 }
 
 .control-button {
@@ -202,7 +235,7 @@ body.stream {
     width: 2.35rem;
     height: 2.35rem;
     border: none;
-    border-radius: 0.6rem;
+    border-radius: 3px;
     opacity: 0.82;
     background-color: transparent;
     cursor: pointer;
@@ -216,6 +249,14 @@ body.stream {
 
 .control-button:active {
     transform: scale(0.94);
+}
+
+.control-divider {
+    width: 1.4rem;
+    height: 1px;
+    margin: 0.15rem 0;
+    background-color: var(--border-color);
+    flex-shrink: 0;
 }
 
 .control-wrapper > input[type=checkbox] {
@@ -252,11 +293,12 @@ body.stream {
 
 .control-wrapper > input[type=checkbox]:checked + label {
     opacity: 1;
-    background-color: var(--accent-soft-color);
+    background-color: var(--accent-color);
+    box-shadow: none;
 }
 
 .control-wrapper > input[type=checkbox]:checked + label > svg {
-    fill: var(--svg-checkbox-bg-color);
+    fill: var(--accent-text-color);
 }
 
 .bitrate-control {
@@ -296,7 +338,7 @@ input[type=range] {
 .compact-stream .control-button {
     width: 2rem;
     height: 2rem;
-    border-radius: 0.5rem;
+    border-radius: 3px;
 }
 
 .compact-stream .device-view[hidden],
@@ -321,7 +363,7 @@ input[type=range] {
     justify-content: center;
     padding: 0.42rem 0.9rem;
     border: 1px solid var(--border-strong-color);
-    border-radius: 999px;
+    border-radius: 3px;
     background: var(--surface-bg-color);
     color: var(--text-color);
     font-size: 0.875rem;
@@ -350,8 +392,8 @@ input[type=range] {
     gap: 0.85rem;
     padding: 1.5rem;
     text-align: center;
-    color: #e2e8f0;
-    background: radial-gradient(circle at 50% 35%, #162238 0%, #0b111e 75%);
+    color: #ededed;
+    background: #000000;
     font: 1rem/1.5 var(--font-sans);
 }
 
@@ -360,24 +402,57 @@ input[type=range] {
     max-width: 26rem;
 }
 
+.stream-spinner {
+    width: 2rem;
+    height: 2rem;
+    border: 2px solid #262626;
+    border-top-color: #ededed;
+    border-radius: 50%;
+    animation: stream-spin 0.8s linear infinite;
+}
+
+@keyframes stream-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.stream-status-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+}
+
 .stream-status button {
     padding: 0.55rem 1.15rem;
-    border: 0;
-    border-radius: 0.6rem;
-    color: #ffffff;
-    background: #3b82f6;
+    border: 1px solid #ededed;
+    border-radius: 3px;
+    color: #0a0a0a;
+    background: #ededed;
     font: 600 0.92rem/1.2 var(--font-sans);
     cursor: pointer;
-    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+    box-shadow: none;
     transition: background-color 0.15s ease, transform 0.1s ease;
 }
 
 .stream-status button:hover {
-    background: #2563eb;
+    background: #ffffff;
+}
+
+.stream-status button.secondary-button {
+    border: 1px solid #333333;
+    background: #0a0a0a;
+    color: #ededed;
+    box-shadow: none;
+}
+
+.stream-status button.secondary-button:hover {
+    background: #171717;
 }
 
 .stream-status a {
-    color: #93c5fd;
+    color: #3291ff;
     text-decoration: none;
     font-size: 0.9rem;
 }
@@ -413,17 +488,23 @@ input[type=range] {
     min-height: 34px;
     padding: 0.3rem 0.85rem;
     border: 1px solid rgba(255, 255, 255, 0.28);
-    border-radius: 999px;
+    border-radius: 3px;
     color: #f8fafc;
     background: rgba(15, 23, 42, 0.72);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     font: 500 0.84rem/1 var(--font-sans);
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.15s ease, opacity 0.25s ease;
 }
 
-.immersive-stream .immersive-exit:hover {
+.immersive-stream.immersive-idle .immersive-exit {
+    opacity: 0.25;
+}
+
+.immersive-stream .immersive-exit:hover,
+.immersive-stream .immersive-exit:focus-visible {
+    opacity: 1;
     background: rgba(15, 23, 42, 0.9);
 }
 
@@ -437,7 +518,7 @@ input[type=range] {
     margin: auto;
     padding: 0.45rem 0.9rem;
     border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 999px;
+    border-radius: 3px;
     color: #f1f5f9;
     background: rgba(15, 23, 42, 0.82);
     backdrop-filter: blur(10px);
@@ -530,5 +611,11 @@ input[type=range] {
 
     .control-button {
         margin: 0;
+    }
+
+    .control-divider {
+        width: 1px;
+        height: 1.4rem;
+        margin: 0 0.15rem;
     }
 }

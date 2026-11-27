@@ -81,6 +81,7 @@ export abstract class BaseDeviceTracker<DD extends BaseDeviceDescriptor, TE exte
     protected id = '';
     private created = false;
     private messageId = 0;
+    private reconnectTimer?: number;
 
     protected constructor(params: ParamsDeviceTracker, protected readonly directUrl: string) {
         super(params);
@@ -104,7 +105,9 @@ export abstract class BaseDeviceTracker<DD extends BaseDeviceDescriptor, TE exte
     }
 
     protected buildDeviceTable(): void {
-        const data = this.descriptors;
+        const data = this.descriptors
+            .slice()
+            .sort((a, b) => (a.state === 'device' ? 0 : 1) - (b.state === 'device' ? 0 : 1));
         const devices = this.getOrCreateTableHolder();
         const tbody = this.getOrBuildTableBody(devices);
 
@@ -152,7 +155,7 @@ export abstract class BaseDeviceTracker<DD extends BaseDeviceDescriptor, TE exte
             return;
         }
         console.log(TAG, `Connection closed: ${event.reason}`);
-        setTimeout(() => {
+        this.reconnectTimer = window.setTimeout(() => {
             this.openNewConnection();
         }, 2000);
     }
@@ -244,6 +247,7 @@ export abstract class BaseDeviceTracker<DD extends BaseDeviceDescriptor, TE exte
     }
 
     public destroy(): void {
+        window.clearTimeout(this.reconnectTimer);
         super.destroy();
         if (this.created) {
             const el = document.getElementById(this.elementId);

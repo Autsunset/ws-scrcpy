@@ -77,10 +77,18 @@ docker compose -f compose.yaml -f compose.tls.yaml up -d --build
 
 MSE 的 **Buffered ahead** 是浏览器已缓冲但尚未播放的时长，不是点击到画面反馈的端到端延迟。播放器在积压时会短暂加速；积压较大或画面停住时，会跳到缓冲区末尾附近，优先显示最近画面。
 
+## 看连接状态与故障恢复
+
+- 设备页区分网页服务、ADB 连接与 scrcpy 进程。Compose 的 `/healthz` 继续只检查网页服务。登录后可查看 `/readyz`：投屏进程就绪时返回 `200`；ADB 不可用、设备未连接或投屏进程未启动时返回 `503` 和对应状态。投屏进程就绪后，仍要等浏览器呈现首帧才能确认画面可用。
+- 投屏断开、连接后 12 秒仍未呈现首帧，或播放器报告错误时，会在当前窗口重新连接，保留这次的画质设置。重试间隔逐步增加，最长 30 秒。可以立即重试、暂停自动重连，或在会话失效后重新登录再重试。
+- **画质与帧率** 分别显示请求设置、设备回报和浏览器实收码率，并记录最近一次连接到首帧的耗时和本次打开后的重连次数。
+
 ## 从外网访问
 
 - 个人使用优先走私有网络。若用公网域名，在飞牛上通过 HTTPS 反代回环地址 `127.0.0.1:8080`，确保支持 WebSocket Upgrade，且不改写浏览器的 `Origin`。将 `WS_SCRCPY_AUTH_ORIGIN` 改成浏览器使用的精确地址（例如 `https://phone.example.com`，不带末尾斜杠），并重建服务容器。
-- HTTP 和 WebSocket 共用登录会话。公网 origin 只接受 HTTPS，Cookie 带 `Secure`、`HttpOnly` 和 `SameSite=Strict`；会话 8 小时后过期，退出时现有串流也会断开。应用的失败冷却是全局的，公网反代仍应加独立的访问限制或身份验证。
+- 需要同时使用多个 HTTPS 地址时，可保留 `WS_SCRCPY_AUTH_ORIGIN`，并通过 `WS_SCRCPY_AUTH_EXTRA_ORIGINS` 指定其他精确来源，多个来源以英文逗号分隔，例如 `https://phone.example.com,https://phone2.example.com`。反向代理应保留浏览器请求的 `Host` 和 `Origin`；每个来源使用独立的登录会话。
+- HTTP 和 WebSocket 共用登录会话。默认有效期为 8 小时，服务重启即失效。仅在自己的设备上勾选 **在此设备保持登录 14 天**：浏览器保存登录凭证而非密码，重新打开同一地址或服务重建后仍然有效（须保留 `auth-sessions` 卷）。主动退出会撤销凭证并断开串流；修改访问密码并重启也会使旧凭证失效。
+- 公网 origin 只接受 HTTPS，Cookie 带 `Secure`、`HttpOnly` 和 `SameSite=Strict`。应用的失败冷却是全局的，公网反代仍应加独立的访问限制或身份验证。
 - Docker 版关闭浏览器 ADB Shell、DevTools 和手机直连串流；认证模式也关闭任意目标的 WebSocket 代理。不要单独对外映射 ADB 或 scrcpy 端口。不带 Docker 的旧启动方式仍可不配置登录，**不能直接暴露**。
 
 需要回退时运行 `docker compose down`（不加 `-v`），原 `8079` 服务和 Redroid 数据不会被替换。

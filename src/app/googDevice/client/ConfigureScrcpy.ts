@@ -52,7 +52,12 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
     private statusText = '';
     private connectionCount = 0;
 
-    constructor(private readonly tracker: DeviceTracker, descriptor: GoogDeviceDescriptor, params: ParamsStreamScrcpy) {
+    constructor(
+        private readonly tracker: DeviceTracker,
+        descriptor: GoogDeviceDescriptor,
+        params: ParamsStreamScrcpy,
+        private readonly players: PlayerClass[],
+    ) {
         super(params);
         this.udid = descriptor.udid;
         this.escapedUdid = Util.escapeUdid(this.udid);
@@ -202,7 +207,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
             return;
         }
         const playerName = this.playerSelectElement.options[this.playerSelectElement.selectedIndex].value;
-        return StreamClientScrcpy.getPlayers().find((playerClass) => {
+        return this.players.find((playerClass) => {
             return playerClass.playerFullName === playerName;
         });
     }
@@ -307,7 +312,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
     ): HTMLInputElement {
         const label = document.createElement('label');
         label.classList.add('label');
-        label.innerText = `${opts.label}:`;
+        label.innerText = opts.label;
         label.id = `label_${opts.id}_${this.escapedUdid}`;
         parent.appendChild(label);
         const input = document.createElement('input');
@@ -318,7 +323,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
             label.setAttribute('title', opts.label);
             input.oninput = () => {
                 const value = range.formatter ? range.formatter(parseInt(input.value, 10)) : input.value;
-                label.innerText = `${opts.label} (${value}):`;
+                label.innerText = `${opts.label} (${value})`;
             };
             input.setAttribute('type', 'range');
             input.setAttribute('max', range.max.toString());
@@ -424,7 +429,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         playerWrapper.appendChild(playerSelect);
         dialogBody.appendChild(playerWrapper);
         const previouslyUsedPlayer = StreamClientScrcpy.getPreferredPlayer(this.udid)?.playerFullName;
-        StreamClientScrcpy.getPlayers().forEach((playerClass, index) => {
+        this.players.forEach((playerClass, index) => {
             const { playerFullName, playerCodeName } = playerClass;
             const optionElement = document.createElement('option');
             optionElement.setAttribute('value', playerFullName);
@@ -463,6 +468,41 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
             id: 'maxFps',
             range: { min: 1, max: 60, step: 1 },
         });
+        const presetLabel = document.createElement('span');
+        presetLabel.className = 'label';
+        presetLabel.textContent = '快捷预设';
+        const presetGroup = document.createElement('div');
+        presetGroup.className = 'input quality-presets';
+        [
+            { label: '省流 · 2M', title: '2 Mbps · 30 FPS · 720p', bitrate: 2_000_000, maxFps: 30, size: 720 },
+            { label: '均衡 · 8M', title: '8 Mbps · 30 FPS · 1280p', bitrate: 8_000_000, maxFps: 30, size: 1280 },
+            { label: '高清 · 16M', title: '16 Mbps · 60 FPS · 1920p', bitrate: 16_000_000, maxFps: 60, size: 1920 },
+        ].forEach((preset) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = preset.label;
+            btn.title = preset.title;
+            btn.onclick = () => {
+                this.bitrateControl?.setValue(preset.bitrate);
+                const maxFpsInput = document.getElementById(`maxFps_${this.escapedUdid}`) as HTMLInputElement | null;
+                if (maxFpsInput) {
+                    maxFpsInput.value = String(preset.maxFps);
+                    maxFpsInput.dispatchEvent(new Event('input'));
+                }
+                const maxWidthInput = document.getElementById(
+                    `maxWidth_${this.escapedUdid}`,
+                ) as HTMLInputElement | null;
+                const maxHeightInput = document.getElementById(
+                    `maxHeight_${this.escapedUdid}`,
+                ) as HTMLInputElement | null;
+                if (maxWidthInput && maxHeightInput) {
+                    maxWidthInput.value = String(preset.size);
+                    maxHeightInput.value = String(preset.size);
+                }
+            };
+            presetGroup.appendChild(btn);
+        });
+        controls.append(presetLabel, presetGroup);
         dialogBody.appendChild(controls);
         const advanced = document.createElement('details');
         advanced.className = 'settings-advanced';
@@ -558,6 +598,7 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         dialogContainer.appendChild(dialogFooter);
         background.appendChild(dialogContainer);
         background.addEventListener('click', this.onBackgroundClick);
+        document.addEventListener('keydown', this.onKeyDown);
         document.body.appendChild(background);
         this.updateVideoSettingsForPlayer();
         return background;
@@ -571,7 +612,15 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         this.loadSettingsButton?.removeEventListener('click', this.loadSettings);
         this.saveSettingsButton?.removeEventListener('click', this.saveSettings);
         this.background.removeEventListener('click', this.onBackgroundClick);
+        document.removeEventListener('keydown', this.onKeyDown);
     }
+
+    private onKeyDown = (event: KeyboardEvent): void => {
+        if (event.key === 'Escape') {
+            event.stopPropagation();
+            this.cancel();
+        }
+    };
 
     private onBackgroundClick = (event: MouseEvent): void => {
         if (event.target !== event.currentTarget) {
@@ -646,6 +695,5 @@ export class ConfigureScrcpy extends BaseClient<ParamsStreamScrcpy, ConfigureScr
         streamUrl.hash = `!${query}`;
         history.replaceState(null, '', streamUrl);
         StreamClientScrcpy.start(params, this.streamReceiver, player, fitToScreen, videoSettings);
-        this.streamReceiver.triggerInitialInfoEvents();
     };
 }

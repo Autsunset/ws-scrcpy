@@ -58,6 +58,8 @@ export class MsePlayer extends BasePlayer {
     private lastPosition = -1;
     private lastProgressAt = 0;
     private lastSeekAt = -Infinity;
+    private videoFrameCallback?: number;
+    private waitingForPresentation = false;
 
     public static isSupported(): boolean {
         return typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(mimeType);
@@ -76,12 +78,23 @@ export class MsePlayer extends BasePlayer {
         };
         tag.addEventListener('error', this.onVideoError);
         tag.addEventListener('canplay', this.onCanPlay);
+        tag.addEventListener('playing', this.onPlaying);
         // eslint-disable-next-line @typescript-eslint/no-empty-function
         setLogger(() => {}, console.error);
     }
 
     onVideoError = (event: Event): void => {
         console.error(`[${this.name}]`, event);
+        if (this.converter) {
+            this.emit('playback-error', this.tag.error ?? event);
+        }
+    };
+
+    private onPlaying = (): void => {
+        if (this.waitingForPresentation && typeof this.tag.requestVideoFrameCallback !== 'function') {
+            this.waitingForPresentation = false;
+            this.onFramePresented();
+        }
     };
 
     private onCanPlay = (): void => {
@@ -196,6 +209,14 @@ export class MsePlayer extends BasePlayer {
             }
             this.converter = MsePlayer.createConverter(this.tag, fps, this.fpf);
             this.resetStats();
+            this.waitingForPresentation = true;
+            if (typeof this.tag.requestVideoFrameCallback === 'function') {
+                this.videoFrameCallback = this.tag.requestVideoFrameCallback(() => {
+                    this.videoFrameCallback = undefined;
+                    this.waitingForPresentation = false;
+                    this.onFramePresented();
+                });
+            }
         }
     }
 
@@ -237,10 +258,16 @@ export class MsePlayer extends BasePlayer {
         const sourceBuffer = this.converter?.sourceBuffer;
         if (sourceBuffer && this.sourceBuffer !== sourceBuffer) {
             this.sourceBuffer?.removeEventListener('updateend', this.onBufferUpdated);
+            this.sourceBuffer?.removeEventListener('error', this.onSourceBufferError);
             this.sourceBuffer = sourceBuffer;
             sourceBuffer.addEventListener('updateend', this.onBufferUpdated);
+            sourceBuffer.addEventListener('error', this.onSourceBufferError);
         }
     }
+
+    private onSourceBufferError = (event: Event): void => {
+        this.emit('playback-error', event);
+    };
 
     private onBufferUpdated = (): void => {
         this.pruneBuffer(this.tag.currentTime);
@@ -329,7 +356,13 @@ export class MsePlayer extends BasePlayer {
         if (!this.converter) {
             return;
         }
+        if (this.videoFrameCallback !== undefined) {
+            this.tag.cancelVideoFrameCallback(this.videoFrameCallback);
+            this.videoFrameCallback = undefined;
+        }
+        this.waitingForPresentation = false;
         this.sourceBuffer?.removeEventListener('updateend', this.onBufferUpdated);
+        this.sourceBuffer?.removeEventListener('error', this.onSourceBufferError);
         this.converter = this.sourceBuffer = undefined;
         this.prunePoints = [];
         this.nextBufferCheck = this.lastProgressAt = 0;

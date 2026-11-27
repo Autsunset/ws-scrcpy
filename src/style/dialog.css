@@ -159,7 +159,7 @@
     max-height: calc(100dvh - 2rem);
     max-width: none;
     border: 1px solid var(--border-strong-color);
-    border-radius: 1.15rem;
+    border-radius: 4px;
     background: var(--surface-bg-color);
     box-shadow: var(--shadow-lg);
 }
@@ -195,8 +195,9 @@
     min-width: 0;
     margin-inline-start: auto;
     overflow: hidden;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
     background: var(--surface-muted-color);
     color: var(--text-color-light);
     font-family: var(--font-mono);
@@ -222,13 +223,24 @@
     padding: 0.5rem 0;
 }
 
+.configureDialog .controls > .label {
+    display: block;
+    text-align: left;
+    justify-self: start;
+}
+
+.configureDialog .controls > .label:has(+ .bitrate-control) {
+    align-self: start;
+    padding-top: 0.55rem;
+}
+
 .configureDialog select,
 .configureDialog input:not([type=range]):not([type=checkbox]) {
     min-width: 0;
     min-height: 2.35rem;
     padding: 0.4rem 0.65rem;
     border: 1px solid var(--border-strong-color);
-    border-radius: 0.55rem;
+    border-radius: 3px;
     color: var(--text-color);
     background: var(--surface-muted-color);
     transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
@@ -246,7 +258,8 @@
     margin: 0.85rem 0;
     padding: 0.75rem 0.9rem;
     border: 1px solid var(--border-color);
-    border-radius: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
     background: var(--surface-muted-color);
 }
 
@@ -270,13 +283,38 @@
     margin-top: 0.65rem;
 }
 
+.quality-presets {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+}
+
+.quality-presets button {
+    padding: 0.38rem 0.5rem;
+    border: 1px solid var(--border-strong-color);
+    border-radius: 3px;
+    background: var(--surface-muted-color);
+    color: var(--text-color);
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.quality-presets button:hover {
+    background: var(--accent-soft-color);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
 .settings-actions button,
 .configureDialog .dialog-footer button {
     height: auto;
     margin: 0;
     padding: 0.5rem 0.95rem;
     border: 1px solid var(--border-strong-color);
-    border-radius: 0.55rem;
+    border-radius: 3px;
     color: var(--text-color);
     background: var(--surface-bg-color);
     font-size: 0.875rem;
@@ -306,7 +344,7 @@
     color: var(--accent-text-color);
     background: var(--accent-color);
     font-weight: 600;
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+    box-shadow: none;
 }
 
 .configureDialog .dialog-footer button:last-child:not(:disabled):hover {
@@ -322,7 +360,7 @@
 
     .dialog-container.configureDialog {
         max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 1rem);
-        border-radius: 1.15rem 1.15rem 0.85rem 0.85rem;
+        border-radius: 4px;
     }
 
     .configureDialog .controls {

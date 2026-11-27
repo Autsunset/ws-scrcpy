@@ -63,6 +63,7 @@ export class Device extends TypedEmitter<DeviceEvents> {
             this.properties = undefined;
         } else {
             this.connected = false;
+            this.descriptor.pid = -1;
         }
         this.descriptor.state = state;
         this.emitUpdate();
@@ -383,8 +384,11 @@ export class Device extends TypedEmitter<DeviceEvents> {
         }
     }
 
-    private async getServerPid(): Promise<undefined | number> {
-        const pids = await ScrcpyServer.getServerPid(this);
+    private async getServerPid(removeOlderVersion = true): Promise<undefined | number> {
+        const pids = await ScrcpyServer.getServerPid(this, removeOlderVersion);
+        if (!this.connected) {
+            return;
+        }
         let pid;
         if (!Array.isArray(pids) || !pids.length) {
             pid = -1;
@@ -400,6 +404,10 @@ export class Device extends TypedEmitter<DeviceEvents> {
         } else {
             return;
         }
+    }
+
+    public async isScrcpyRunning(): Promise<boolean> {
+        return (await this.getServerPid(false)) !== undefined;
     }
 
     public async updateInterfaces(): Promise<NetInterface[]> {

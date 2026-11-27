@@ -23,6 +23,7 @@ const COMMAND_LABELS = new Map([
 export class GoogMoreBox {
     private static defaultSize = new Size(480, 480);
     private onStop?: () => void;
+    private onOpenChange?: (open: boolean) => void;
     private readonly holder: HTMLElement;
     private readonly input: HTMLTextAreaElement;
     private readonly bitrateControl?: BitrateControl;
@@ -30,10 +31,15 @@ export class GoogMoreBox {
     private readonly iFrameIntervalInput?: HTMLInputElement;
     private readonly maxWidthInput?: HTMLInputElement;
     private readonly maxHeightInput?: HTMLInputElement;
+    private readonly actionStatus = document.createElement('p');
     private readonly profileMessage = document.createElement('p');
     private readonly streamReport = document.createElement('p');
+    private actionStatusTimer?: number;
     private reportTimer?: number;
+    private isOpen = false;
     private report?: { settings: VideoSettings; size: Size };
+    private requestedProfile?: VideoSettings;
+    private connectionMetrics?: { firstFrameMs: number; reconnects: number };
 
     constructor(udid: string, private player: BasePlayer, private client: StreamClientScrcpy) {
         const playerName = player.getName();
@@ -49,16 +55,28 @@ export class GoogMoreBox {
         const input = (this.input = document.createElement('textarea'));
         input.classList.add('text-area');
         input.setAttribute('aria-label', '发送到 Android 的文本');
-        input.placeholder = '输入要发往 Android 的文本';
+        input.placeholder = '输入要发往 Android 的文本（Ctrl/Cmd + Enter 发送）';
         const sendButton = document.createElement('button');
+        sendButton.type = 'button';
         sendButton.innerText = '发送文本';
 
-        const inputWrapper = GoogMoreBox.wrap('p', [input, sendButton], moreBox);
-        sendButton.onclick = () => {
+        const sendText = () => {
             if (input.value) {
                 client.sendMessage(new TextControlMessage(input.value));
+                this.showActionStatus('已发送文本到设备');
             }
         };
+        const inputWrapper = GoogMoreBox.wrap('p', [input, sendButton], moreBox);
+        sendButton.onclick = sendText;
+        input.addEventListener('keydown', (event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                sendText();
+            }
+        });
+        this.actionStatus.className = 'action-status';
+        this.actionStatus.setAttribute('role', 'status');
+        moreBox.appendChild(this.actionStatus);
 
         const commands: HTMLElement[] = [];
         const codes = CommandControlMessage.Commands;
@@ -168,13 +186,26 @@ export class GoogMoreBox {
                 btn.onclick = () => {
                     const bitrate = bitrateControl.readValue();
                     const maxFps = parseInt(maxFpsInput.value, 10);
-                    const iFrameInterval = parseInt(iFrameIntervalInput.value, 10);
+                    const iFrameInterval = Number(iFrameIntervalInput.value);
                     if (bitrate === undefined || isNaN(maxFps)) {
                         return;
                     }
-                    const width = parseInt(maxWidthInput.value, 10) & ~15;
-                    const height = parseInt(maxHeightInput.value, 10) & ~15;
-                    const bounds = new Size(width, height);
+                    const width = Number(maxWidthInput.value);
+                    const height = Number(maxHeightInput.value);
+                    if (
+                        !iFrameIntervalInput.value.trim() ||
+                        !Number.isInteger(iFrameInterval) ||
+                        iFrameInterval < -128 ||
+                        iFrameInterval > 127
+                    ) {
+                        this.setProfileStatus('关键帧间隔须填写 -128 至 127 之间的整数。');
+                        return;
+                    }
+                    if (![width, height].every((value) => Number.isInteger(value) && value >= 16 && value <= 32767)) {
+                        this.setProfileStatus('宽度和高度须填写 16 至 32767 之间的整数。');
+                        return;
+                    }
+                    const bounds = new Size(width & ~15, height & ~15);
                     const current = player.getVideoSettings();
                     const { lockedVideoOrientation, sendFrameMeta, displayId, codecOptions, encoderName } = current;
                     const videoSettings = new VideoSettings({
@@ -195,35 +226,35 @@ export class GoogMoreBox {
                     const text = input.value;
                     if (text) {
                         client.sendMessage(CommandControlMessage.createSetClipboardCommand(text));
+                        this.showActionStatus('已发送到设备剪贴板');
                     }
                 };
             } else {
                 btn.onclick = () => {
                     client.sendMessage(new CommandControlMessage(action));
+                    if (action === CommandControlMessage.TYPE_GET_CLIPBOARD) {
+                        this.showActionStatus('正在读取设备剪贴板…');
+                    }
                 };
             }
         }
         GoogMoreBox.wrap('p', commands, moreBox);
 
-        const screenPowerModeId = `screen_power_mode_${udid}_${playerName}_${displayId}`;
-        const screenPowerModeLabel = document.createElement('label');
-        screenPowerModeLabel.style.display = 'none';
-        const screenPowerModeCheck = document.createElement('input');
-        screenPowerModeCheck.type = 'checkbox';
-        screenPowerModeCheck.id = screenPowerModeLabel.htmlFor = screenPowerModeId;
-        screenPowerModeCheck.setAttribute('aria-label', '开启 Android 屏幕');
-        const sendScreenPowerModeButton = document.createElement('button');
-        sendScreenPowerModeButton.innerText = '关闭屏幕';
-        screenPowerModeCheck.onchange = () => {
-            sendScreenPowerModeButton.innerText = screenPowerModeCheck.checked ? '开启屏幕' : '关闭屏幕';
+        const screenOffButton = document.createElement('button');
+        screenOffButton.type = 'button';
+        screenOffButton.innerText = '息屏';
+        screenOffButton.onclick = () => {
+            client.sendMessage(CommandControlMessage.createSetScreenPowerModeCommand(false));
+            this.showActionStatus('已发送息屏指令');
         };
-        sendScreenPowerModeButton.onclick = () => {
-            const message = CommandControlMessage.createSetScreenPowerModeCommand(screenPowerModeCheck.checked);
-            client.sendMessage(message);
+        const screenOnButton = document.createElement('button');
+        screenOnButton.type = 'button';
+        screenOnButton.innerText = '亮屏';
+        screenOnButton.onclick = () => {
+            client.sendMessage(CommandControlMessage.createSetScreenPowerModeCommand(true));
+            this.showActionStatus('已发送亮屏指令');
         };
-        GoogMoreBox.wrap('p', [screenPowerModeCheck, screenPowerModeLabel, sendScreenPowerModeButton], moreBox, [
-            'flex-center',
-        ]);
+        GoogMoreBox.wrap('p', [screenOffButton, screenOnButton], moreBox, ['flex-center', 'screen-power-actions']);
 
         const qualityId = `show_video_quality_${udid}_${playerName}_${displayId}`;
         const qualityLabel = document.createElement('label');
@@ -236,6 +267,33 @@ export class GoogMoreBox {
         GoogMoreBox.wrap('p', [qualityCheck, qualityLabel], moreBox, ['flex-center']);
         qualityCheck.onchange = () => {
             player.setShowQualityStats(qualityCheck.checked);
+        };
+
+        const einkId = `eink_mode_${udid}_${playerName}_${displayId}`;
+        const einkLabel = document.createElement('label');
+        const einkCheck = document.createElement('input');
+        einkCheck.type = 'checkbox';
+        einkCheck.id = einkId;
+        einkLabel.htmlFor = einkId;
+        einkLabel.innerText = '墨水屏模式';
+        try {
+            einkCheck.checked = localStorage.getItem('ws_scrcpy::eink_mode') === '1';
+        } catch {
+            einkCheck.checked = false;
+        }
+        GoogMoreBox.wrap('p', [einkCheck, einkLabel], moreBox, ['flex-center']);
+        einkCheck.onchange = () => {
+            const enabled = einkCheck.checked;
+            moreBox.closest('.device-view')?.classList.toggle('eink-mode', enabled);
+            try {
+                if (enabled) {
+                    localStorage.setItem('ws_scrcpy::eink_mode', '1');
+                } else {
+                    localStorage.removeItem('ws_scrcpy::eink_mode');
+                }
+            } catch {
+                // ignore storage errors
+            }
         };
 
         const stop = (ev?: string | Event) => {
@@ -253,11 +311,15 @@ export class GoogMoreBox {
         };
 
         const stopBtn = document.createElement('button') as HTMLButtonElement;
+        stopBtn.type = 'button';
+        stopBtn.className = 'danger-button';
         stopBtn.innerText = '断开连接';
         stopBtn.onclick = stop;
 
         GoogMoreBox.wrap('p', [stopBtn], moreBox);
         player.on('video-settings', this.onVideoSettings);
+        document.addEventListener('pointerdown', this.onOutsidePointerDown);
+        document.addEventListener('keydown', this.onDocumentKeyDown);
         this.holder = moreBox;
     }
 
@@ -290,18 +352,59 @@ export class GoogMoreBox {
         this.renderStreamReport();
     }
 
+    public setRequestedProfile(settings: VideoSettings): void {
+        this.requestedProfile = settings;
+        this.renderStreamReport();
+    }
+
+    public setConnectionMetrics(firstFrameMs: number, reconnects: number): void {
+        this.connectionMetrics = { firstFrameMs, reconnects };
+        this.renderStreamReport();
+    }
+
+    public clearStreamReport(): void {
+        this.report = undefined;
+        this.renderStreamReport();
+    }
+
+    private formatProfile(settings: VideoSettings): string {
+        const { bitrate, maxFps, iFrameInterval, bounds, encoderName } = settings;
+        const size = bounds ? `${bounds.width} × ${bounds.height}` : '不限';
+        const encoder = encoderName ? ` · ${encoderName}` : '';
+        return `上限 ${size} · ${bitrate / 1_000_000} Mbps · ${maxFps} FPS · 关键帧 ${iFrameInterval} 秒${encoder}`;
+    }
+
     private renderStreamReport = (): void => {
-        if (!this.report) {
-            return;
+        const lines: string[] = [];
+        if (this.requestedProfile) {
+            lines.push(`请求：${this.formatProfile(this.requestedProfile)}`);
         }
-        const { settings, size } = this.report;
-        const mbps = this.player.getReceivedMbps();
-        this.streamReport.textContent =
-            `设备回报：${size.width} × ${size.height} · 目标 ${settings.bitrate / 1_000_000} Mbps` +
-            ` · ${settings.maxFps} FPS${mbps === undefined ? '' : ` · 实收约 ${mbps.toFixed(1)} Mbps`}`;
+        if (this.report) {
+            const { settings, size } = this.report;
+            const mbps = this.player.getReceivedMbps();
+            lines.push(`设备回报：画面 ${size.width} × ${size.height} · ${this.formatProfile(settings)}`);
+            if (mbps !== undefined) {
+                lines.push(`浏览器实收：约 ${mbps.toFixed(1)} Mbps`);
+            }
+        }
+        if (this.connectionMetrics) {
+            const { firstFrameMs, reconnects } = this.connectionMetrics;
+            lines.push(`最近首帧：${firstFrameMs} ms · 本次重连：${reconnects} 次`);
+        }
+        this.streamReport.replaceChildren();
+        for (const line of lines) {
+            if (this.streamReport.hasChildNodes()) {
+                this.streamReport.append(document.createElement('br'));
+            }
+            this.streamReport.append(line);
+        }
     };
 
     public setOpen(open: boolean): void {
+        if (this.isOpen === open && this.holder.style.display === (open ? 'block' : 'none')) {
+            return;
+        }
+        this.isOpen = open;
         this.holder.style.display = open ? 'block' : 'none';
         window.clearInterval(this.reportTimer);
         this.reportTimer = undefined;
@@ -309,10 +412,47 @@ export class GoogMoreBox {
             this.renderStreamReport();
             this.reportTimer = window.setInterval(this.renderStreamReport, 1000);
         }
+        this.onOpenChange?.(open);
     }
+
+    public setOnOpenChange(listener: (open: boolean) => void): void {
+        this.onOpenChange = listener;
+    }
+
+    private showActionStatus(message: string): void {
+        window.clearTimeout(this.actionStatusTimer);
+        this.actionStatus.textContent = message;
+        this.actionStatusTimer = window.setTimeout(() => {
+            this.actionStatus.textContent = '';
+        }, 2500);
+    }
+
+    private onOutsidePointerDown = (event: PointerEvent): void => {
+        if (!this.isOpen) {
+            return;
+        }
+        const target = event.target as HTMLElement | null;
+        if (!target) {
+            return;
+        }
+        if (this.holder.contains(target) || target.closest('.control-buttons-list')) {
+            return;
+        }
+        this.setOpen(false);
+    };
+
+    private onDocumentKeyDown = (event: KeyboardEvent): void => {
+        if (this.isOpen && event.key === 'Escape') {
+            event.stopPropagation();
+            this.setOpen(false);
+        }
+    };
 
     public dispose(): void {
         window.clearInterval(this.reportTimer);
+        window.clearTimeout(this.actionStatusTimer);
+        document.removeEventListener('pointerdown', this.onOutsidePointerDown);
+        document.removeEventListener('keydown', this.onDocumentKeyDown);
         this.player.off('video-settings', this.onVideoSettings);
     }
 
@@ -338,6 +478,7 @@ export class GoogMoreBox {
         this.input.value = ev.getText();
         this.input.select();
         document.execCommand('copy');
+        this.showActionStatus('已读取设备剪贴板');
     }
 
     private static wrap(

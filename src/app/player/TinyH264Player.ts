@@ -99,9 +99,10 @@ export class TinyH264Player extends BaseCanvasBasedPlayer {
         super.stop();
         if (this.worker) {
             this.worker.removeEventListener('message', this.onWorkerMessage);
-            this.worker.postMessage({ type: 'release', renderStateId: TinyH264Player.videoStreamId });
+            this.worker.terminate();
             delete this.worker;
         }
+        this.isDecoderReady = false;
     }
 
     public getPreferredVideoSetting(): VideoSettings {

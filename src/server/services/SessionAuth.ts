@@ -1,16 +1,22 @@
-import { createHash, randomBytes, timingSafeEqual } from 'crypto';
-import { readFileSync } from 'fs';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
+import { dirname, join } from 'path';
 import { IncomingMessage } from 'http';
 import express, { Router } from 'express';
 import WS from 'ws';
 import { sessionPage } from './sessionPage';
 
 const SESSION_LIFETIME = 8 * 60 * 60 * 1000;
+const REMEMBER_LIFETIME = 14 * 24 * 60 * 60 * 1000;
 const MAX_SESSIONS = 16;
 const MAX_FAILURES = 8;
 const LOGIN_COOLDOWN = 60_000;
 
 interface Session {
+    origin: string;
+    expiresAt: number;
+    remembered: boolean;
     sockets: Set<WS>;
     timer: NodeJS.Timeout;
 }
@@ -19,9 +25,11 @@ export class SessionAuth {
     private static instance?: SessionAuth;
     private readonly sessions = new Map<string, Session>();
     private readonly origin?: string;
+    private readonly allowedOrigins = new Set<string>();
     private readonly passwordHash?: Buffer;
     private readonly secure: boolean;
     private readonly cookieName: string;
+    private readonly sessionFile = join(homedir(), '.ws-scrcpy', 'sessions.json');
     private failures = 0;
     private cooldownUntil = 0;
 
@@ -47,7 +55,24 @@ export class SessionAuth {
                 throw new Error('WS_SCRCPY_AUTH_ORIGIN must be an HTTPS origin or a loopback HTTP origin');
             }
             this.origin = url.origin;
+            this.allowedOrigins.add(url.origin);
+            const extraOrigins = (process.env.WS_SCRCPY_AUTH_EXTRA_ORIGINS || '')
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean);
+            for (const extraOrigin of extraOrigins) {
+                const extraUrl = new URL(extraOrigin);
+                if (
+                    extraOrigin !== extraUrl.origin ||
+                    extraUrl.protocol !== url.protocol ||
+                    extraUrl.protocol !== 'https:'
+                ) {
+                    throw new Error('Additional login origins must be HTTPS origins');
+                }
+                this.allowedOrigins.add(extraUrl.origin);
+            }
             this.passwordHash = this.hash(password);
+            this.restoreSessions();
         }
         this.secure = this.origin?.startsWith('https:') ?? false;
         this.cookieName = this.secure ? '__Host-ws_scrcpy_session' : 'ws_scrcpy_session';
@@ -74,20 +99,81 @@ export class SessionAuth {
             ?.slice(this.cookieName.length + 1);
     }
 
-    private getSession(request: IncomingMessage): Session | undefined {
-        return this.sessions.get(this.token(request) ?? '');
+    private sessionId(token: string): string {
+        return createHmac('sha256', this.passwordHash!).update(token).digest('hex');
     }
 
-    private revoke(token: string): void {
-        const session = this.sessions.get(token);
-        if (session) {
-            this.sessions.delete(token);
-            clearTimeout(session.timer);
-            session.sockets.forEach((socket) => socket.terminate());
+    private requestId(request: IncomingMessage): string {
+        const token = this.token(request);
+        return token && /^[a-f0-9]{64}$/.test(token) ? this.sessionId(token) : '';
+    }
+
+    private getSession(request: IncomingMessage): Session | undefined {
+        const session = this.sessions.get(this.requestId(request));
+        return session && session.expiresAt > Date.now() && new URL(session.origin).host === request.headers.host
+            ? session
+            : undefined;
+    }
+
+    private allowsOrigin(request: IncomingMessage): boolean {
+        const origin = request.headers.origin;
+        return !!origin && this.allowedOrigins.has(origin) && new URL(origin).host === request.headers.host;
+    }
+
+    private restoreSessions(): void {
+        let contents: string;
+        try {
+            contents = readFileSync(this.sessionFile, 'utf8');
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+                return;
+            }
+            throw error;
+        }
+        const now = Date.now();
+        for (const { id, origin, expiresAt } of JSON.parse(contents)) {
+            if (
+                typeof id === 'string' &&
+                /^[a-f0-9]{64}$/.test(id) &&
+                this.allowedOrigins.has(origin) &&
+                Number.isSafeInteger(expiresAt) &&
+                expiresAt > now &&
+                expiresAt <= now + REMEMBER_LIFETIME &&
+                this.sessions.size < MAX_SESSIONS
+            ) {
+                this.addSession(id, origin, expiresAt, true);
+            }
         }
     }
 
-    private createSession(): string {
+    private saveSessions(): void {
+        const records = Array.from(this.sessions)
+            .filter(([, session]) => session.remembered)
+            .map(([id, { origin, expiresAt }]) => ({ id, origin, expiresAt }));
+        mkdirSync(dirname(this.sessionFile), { recursive: true, mode: 0o700 });
+        const temporary = `${this.sessionFile}.tmp`;
+        writeFileSync(temporary, JSON.stringify(records), { mode: 0o600 });
+        renameSync(temporary, this.sessionFile);
+    }
+
+    private revoke(id: string, persist = true): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            this.sessions.delete(id);
+            clearTimeout(session.timer);
+            session.sockets.forEach((socket) => socket.terminate());
+            if (session.remembered && persist) {
+                this.saveSessions();
+            }
+        }
+    }
+
+    private addSession(id: string, origin: string, expiresAt: number, remembered: boolean): void {
+        const timer = setTimeout(() => this.revoke(id, false), expiresAt - Date.now()).unref();
+        this.sessions.set(id, { origin, expiresAt, remembered, sockets: new Set(), timer });
+    }
+
+    private createSession(origin: string, lifetime: number, remembered: boolean): string {
         if (this.sessions.size >= MAX_SESSIONS) {
             const oldest = this.sessions.keys().next().value;
             if (oldest) {
@@ -95,13 +181,17 @@ export class SessionAuth {
             }
         }
         const token = randomBytes(32).toString('hex');
-        const timer = setTimeout(() => this.revoke(token), SESSION_LIFETIME).unref();
-        this.sessions.set(token, { sockets: new Set(), timer });
+        this.addSession(this.sessionId(token), origin, Date.now() + lifetime, remembered);
+        if (remembered) {
+            this.saveSessions();
+        }
         return token;
     }
 
     public allowsUpgrade(request: IncomingMessage): boolean {
-        return !this.enabled || (request.headers.origin === this.origin && !!this.getSession(request));
+        return (
+            !this.enabled || (this.allowsOrigin(request) && this.getSession(request)?.origin === request.headers.origin)
+        );
     }
 
     public trackSocket(request: IncomingMessage, socket: WS): boolean {
@@ -143,13 +233,14 @@ export class SessionAuth {
         router.post(
             '/login',
             (request, response, next) => {
-                if (request.headers.origin !== this.origin) {
+                const session = this.getSession(request);
+                if (!this.allowsOrigin(request) || (session && session.origin !== request.headers.origin)) {
                     response.sendStatus(403);
                 } else {
                     next();
                 }
             },
-            express.urlencoded({ extended: false, limit: '2kb', parameterLimit: 1 }),
+            express.urlencoded({ extended: false, limit: '2kb', parameterLimit: 2 }),
             (request, response) => {
                 const remaining = this.cooldownUntil - Date.now();
                 if (remaining > 0) {
@@ -167,8 +258,13 @@ export class SessionAuth {
                     return;
                 }
                 this.failures = 0;
-                this.revoke(this.token(request) ?? '');
-                response.set('Set-Cookie', this.cookie(this.createSession(), SESSION_LIFETIME / 1000));
+                this.revoke(this.requestId(request));
+                const remembered = request.body?.remember === 'yes';
+                const lifetime = remembered ? REMEMBER_LIFETIME : SESSION_LIFETIME;
+                response.set(
+                    'Set-Cookie',
+                    this.cookie(this.createSession(request.headers.origin!, lifetime, remembered), lifetime / 1000),
+                );
                 response.redirect(303, base);
             },
         );
@@ -184,11 +280,12 @@ export class SessionAuth {
         router.get('/session', (_request, response) => response.sendStatus(204));
         router.get('/logout', (_request, response) => response.send(sessionPage('logout')));
         router.post('/logout', (request, response) => {
-            if (request.headers.origin !== this.origin) {
+            const session = this.getSession(request);
+            if (!this.allowsOrigin(request) || (session && session.origin !== request.headers.origin)) {
                 response.sendStatus(403);
                 return;
             }
-            this.revoke(this.token(request) ?? '');
+            this.revoke(this.requestId(request));
             response.set('Set-Cookie', this.cookie('', 0));
             response.redirect(303, login);
         });

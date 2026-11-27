@@ -30,6 +30,8 @@ export interface PlayerEvents {
     'video-view-resize': Size;
     'input-video-resize': ScreenInfo;
     'video-settings': VideoSettings;
+    'first-frame': void;
+    'playback-error': unknown;
 }
 
 export interface PlayerClass {
@@ -81,6 +83,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
     private qualityTimer?: number;
     private showQualityStats = BasePlayer.DEFAULT_SHOW_QUALITY_STATS;
     protected receivedFirstFrame = false;
+    private presentedFirstFrame = false;
     private statLines: string[] = [];
     public readonly supportsScreenshot: boolean = false;
     public readonly resizeVideoToBounds: boolean = false;
@@ -330,9 +333,25 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
 
     public stop(): void {
         this.state = BasePlayer.STATE.STOPPED;
+        this.receivedFirstFrame = false;
+        this.presentedFirstFrame = false;
         if (this.qualityTimer !== undefined) {
             window.clearTimeout(this.qualityTimer);
             this.qualityTimer = undefined;
+        }
+    }
+
+    public resetForStream(): void {
+        this.stop();
+        this.screenInfo = undefined;
+        this.resetStats();
+        this.pause();
+    }
+
+    protected onFramePresented(): void {
+        if (!this.presentedFirstFrame && this.getState() === BasePlayer.STATE.PLAYING) {
+            this.presentedFirstFrame = true;
+            this.emit('first-frame', undefined);
         }
     }
 
@@ -466,15 +485,13 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
                 inputBytes: this.totalStats.inputBytes + this.momentumQualityStats.inputBytes,
             };
 
-            if (this.totalStatsCounter !== 0) {
-                this.perSecondQualityStats = {
-                    avgDecoded: this.totalStats.decodedFrames / this.totalStatsCounter,
-                    avgDropped: this.totalStats.droppedFrames / this.totalStatsCounter,
-                    avgInput: this.totalStats.inputFrames / this.totalStatsCounter,
-                    avgSize: this.totalStats.inputBytes / this.totalStatsCounter,
-                };
-            }
             this.totalStatsCounter++;
+            this.perSecondQualityStats = {
+                avgDecoded: this.totalStats.decodedFrames / this.totalStatsCounter,
+                avgDropped: this.totalStats.droppedFrames / this.totalStatsCounter,
+                avgInput: this.totalStats.inputFrames / this.totalStatsCounter,
+                avgSize: this.totalStats.inputBytes / this.totalStatsCounter,
+            };
         }
         this.drawStats();
     };
@@ -512,15 +529,10 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
             newStats.push(`Not supported`);
         }
         newStats.push(...this.getAdditionalQualityStats());
-        let changed = this.statLines.length !== newStats.length;
-        let i = 0;
-        while (!changed && i++ < newStats.length) {
-            if (newStats[i] !== this.statLines[i]) {
-                changed = true;
-            }
-        }
-
-        if (changed) {
+        if (
+            this.statLines.length !== newStats.length ||
+            newStats.some((line, index) => line !== this.statLines[index])
+        ) {
             this.statLines = newStats;
             this.updateCanvas(false);
         }
@@ -566,6 +578,7 @@ export abstract class BasePlayer extends TypedEmitter<PlayerEvents> {
         this.showQualityStats = value;
         if (!value) {
             this.updateCanvas(true);
+            this.statLines = [];
         } else {
             this.drawStats();
         }

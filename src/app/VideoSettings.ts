@@ -36,15 +36,15 @@ export default class VideoSettings {
             this.maxFps = data.maxFps;
             this.iFrameInterval = data.iFrameInterval;
             this.sendFrameMeta = data.sendFrameMeta || false;
-            this.lockedVideoOrientation = data.lockedVideoOrientation || -1;
+            this.lockedVideoOrientation = data.lockedVideoOrientation ?? -1;
             if (typeof data.displayId === 'number' && !isNaN(data.displayId) && data.displayId >= 0) {
                 this.displayId = data.displayId;
             }
             if (data.codecOptions) {
-                this.codecOptions = data.codecOptions.trim();
+                this.codecOptions = data.codecOptions.trim() || undefined;
             }
             if (data.encoderName) {
-                this.encoderName = data.encoderName.trim();
+                this.encoderName = data.encoderName.trim() || undefined;
             }
         }
     }
@@ -143,6 +143,7 @@ export default class VideoSettings {
             this.codecOptions === o.codecOptions &&
             Rect.equals(this.crop, o.crop) &&
             this.lockedVideoOrientation === o.lockedVideoOrientation &&
+            this.sendFrameMeta === o.sendFrameMeta &&
             this.displayId === o.displayId &&
             Size.equals(this.bounds, o.bounds) &&
             this.bitrate === o.bitrate &&

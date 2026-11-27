@@ -55,6 +55,11 @@ export class BroadwayPlayer extends BaseCanvasBasedPlayer {
         this.avc.decode(data);
     }
 
+    public stop(): void {
+        super.stop();
+        this.avc = undefined;
+    }
+
     public getPreferredVideoSetting(): VideoSettings {
         return BroadwayPlayer.preferredVideoSettings;
     }

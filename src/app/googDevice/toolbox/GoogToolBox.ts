@@ -46,6 +46,7 @@ export interface GoogToolBoxOptions {
     // Start with keyboard capture enabled instead of requiring the user to tick
     // the "Capture keyboard" checkbox first.
     captureKeyboard?: boolean;
+    onBack?: () => void;
 }
 
 export class GoogToolBox extends ToolBox {
@@ -65,6 +66,13 @@ export class GoogToolBox extends ToolBox {
         const sendKey = (code: number, action: number) => {
             client.sendMessage(new KeyCodeControlMessage(action, code, 0, 0));
         };
+        const pressed = new Set<number>();
+        const releaseKey = (code: number) => {
+            if (!pressed.delete(code)) {
+                return;
+            }
+            sendKey(code, KeyEvent.ACTION_UP);
+        };
         const handler = <K extends keyof HTMLElementEventMap, T extends HTMLElement>(
             type: K,
             element: ToolBoxElement<T>,
@@ -73,15 +81,23 @@ export class GoogToolBox extends ToolBox {
                 return;
             }
             const { code } = element.optional;
-            const action = type === 'mousedown' ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP;
-            sendKey(code, action);
+            if (type === 'pointerdown') {
+                if (!pressed.has(code)) {
+                    pressed.add(code);
+                    sendKey(code, KeyEvent.ACTION_DOWN);
+                }
+            } else {
+                releaseKey(code);
+            }
         };
         const elements: ToolBoxElement<any>[] = list.map((item) => {
             const button = new ToolBoxButton(item.title, item.icon, {
                 code: item.code,
             });
-            button.addEventListener('mousedown', handler);
-            button.addEventListener('mouseup', handler);
+            button.addEventListener('pointerdown', handler);
+            button.addEventListener('pointerup', handler);
+            button.addEventListener('pointercancel', handler);
+            button.addEventListener('pointerleave', handler);
             if (
                 [KeyEvent.KEYCODE_POWER, KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN].includes(item.code)
             ) {
@@ -110,6 +126,9 @@ export class GoogToolBox extends ToolBox {
         keyboard.addEventListener('click', (_, el) => {
             const element = el.getElement();
             client.setHandleKeyboardEvents(element.checked);
+            if (element.checked) {
+                element.closest<HTMLElement>('.device-view')?.focus();
+            }
         });
         if (options.captureKeyboard) {
             keyboard.getElement().checked = true;
@@ -149,8 +168,25 @@ export class GoogToolBox extends ToolBox {
                 const element = el.getElement();
                 settingsMenu.setOpen(element.checked);
             });
+            settingsMenu.setOnOpenChange((open) => {
+                more.getElement().checked = open;
+            });
             elements.unshift(more);
         }
-        return new GoogToolBox(elements);
+        if (options.onBack) {
+            const back = new ToolBoxButton('返回设备列表', SvgImage.Icon.ARROW_BACK);
+            back.addEventListener('click', () => options.onBack?.());
+            elements.unshift(back);
+        }
+        const toolBox = new GoogToolBox(elements);
+        const holder = toolBox.getHolderElement();
+        const keyboardInput = keyboard.getElement();
+        if (keyboardInput.parentElement === holder) {
+            const divider = document.createElement('div');
+            divider.className = 'control-divider';
+            divider.setAttribute('aria-hidden', 'true');
+            holder.insertBefore(divider, keyboardInput);
+        }
+        return toolBox;
     }
 }

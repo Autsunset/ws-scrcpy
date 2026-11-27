@@ -31,6 +31,8 @@ import { StreamReceiverScrcpy } from './StreamReceiverScrcpy';
 import { ParamsDeviceTracker } from '../../../types/ParamsDeviceTracker';
 import { ScrcpyFilePushStream } from '../filePush/ScrcpyFilePushStream';
 import { StreamFullscreen } from '../StreamFullscreen';
+import { StreamRecovery, StreamStatus } from '../StreamRecovery';
+import { getScrcpyPlayerOptions } from '../ScrcpyPlayers';
 
 type StartParams = {
     udid: string;
@@ -57,6 +59,7 @@ export class StreamClientScrcpy
     private joinedStream = false;
     private applyProfileOnJoin = false;
     private profileTimer?: ReturnType<typeof setTimeout>;
+    private desiredProfile?: VideoSettings;
     private requestedProfile?: VideoSettings;
     private reportedProfile?: VideoSettings;
     private touchHandler?: FeaturedInteractionHandler;
@@ -65,20 +68,22 @@ export class StreamClientScrcpy
     private filePushHandler?: FilePushHandler;
     private fitToScreen?: boolean;
     private streamStatus?: HTMLElement;
-    private manuallyStopped = false;
-    private readonly streamReceiver: StreamReceiverScrcpy;
+    private retryMessage?: HTMLElement;
+    private streamReceiver?: StreamReceiverScrcpy;
+    private readonly recovery = new StreamRecovery({
+        connect: () => this.connectStream(),
+        disconnect: () => this.disconnectStream(),
+        status: (status) => this.showStreamStatus(status),
+        sessionExpired: () => this.sessionExpired(),
+    });
+    private keyboardEnabled = false;
+    private suspended = false;
 
-    public static registerPlayer(playerClass: PlayerClass): void {
-        if (playerClass.isSupported()) {
-            this.players.set(playerClass.playerFullName, playerClass);
-        }
+    public static getPlayers(): ReturnType<typeof getScrcpyPlayerOptions> {
+        return getScrcpyPlayerOptions();
     }
 
-    public static getPlayers(): PlayerClass[] {
-        return Array.from(this.players.values());
-    }
-
-    public static getPreferredPlayer(udid?: string): PlayerClass | undefined {
+    public static getPreferredPlayer(udid?: string): ReturnType<typeof getScrcpyPlayerOptions>[number] | undefined {
         let saved = '';
         if (udid) {
             try {
@@ -87,12 +92,51 @@ export class StreamClientScrcpy
                 saved = '';
             }
         }
-        return (
-            this.getPlayerClass(saved) ??
-            this.getPlayerClass('mse') ??
-            this.getPlayerClass('webcodecs') ??
-            this.getPlayers()[0]
+        const options = this.getPlayers();
+        const selected = options.find(
+            ({ playerCodeName, playerFullName }) => saved === playerCodeName || saved === playerFullName,
         );
+        return selected ?? options[0];
+    }
+
+    public static async loadPlayer(udid: string, name: string | null): Promise<PlayerClass | undefined> {
+        const options = this.getPlayers();
+        const selected = options.find(
+            ({ playerCodeName, playerFullName }) => name === playerCodeName || name === playerFullName,
+        );
+        const preferred = selected ?? this.getPreferredPlayer(udid);
+        const candidates = preferred ? [preferred, ...options.filter((option) => option !== preferred)] : options;
+        for (const option of candidates) {
+            const player = await this.registerPlayer(option);
+            if (player) {
+                return player;
+            }
+        }
+        return undefined;
+    }
+
+    public static async loadPlayers(): Promise<PlayerClass[]> {
+        const players = await Promise.all(this.getPlayers().map((option) => this.registerPlayer(option)));
+        return players.filter((player): player is PlayerClass => player !== undefined);
+    }
+
+    private static async registerPlayer(
+        option: ReturnType<typeof getScrcpyPlayerOptions>[number],
+    ): Promise<PlayerClass | undefined> {
+        const cached = this.players.get(option.playerFullName);
+        if (cached) {
+            return cached;
+        }
+        try {
+            const player = await option.load();
+            if (player.isSupported()) {
+                this.players.set(player.playerFullName, player);
+                return player;
+            }
+        } catch (error) {
+            console.warn(TAG, `无法加载播放器 ${option.playerFullName}`, error);
+        }
+        return undefined;
     }
 
     private static getPlayerStorageKey(udid: string): string {
@@ -171,11 +215,7 @@ export class StreamClientScrcpy
         videoSettings?: VideoSettings,
     ) {
         super(params);
-        if (streamReceiver) {
-            this.streamReceiver = streamReceiver;
-        } else {
-            this.streamReceiver = new StreamReceiverScrcpy(this.params);
-        }
+        this.streamReceiver = streamReceiver;
 
         const { udid, player: playerName } = this.params;
         // Allow the stream deep link to start already fit to screen
@@ -212,18 +252,20 @@ export class StreamClientScrcpy
     };
 
     public onVideo = (data: Uint8Array): void => {
-        if (!this.player) {
+        const player = this.player;
+        if (!player) {
             return;
         }
         const STATE = BasePlayer.STATE;
-        if (this.player.getState() === STATE.PAUSED) {
-            this.player.play();
-        }
-        if (this.player.getState() === STATE.PLAYING) {
-            this.player.pushFrame(data);
-            if (this.streamStatus && !this.streamStatus.hidden) {
-                this.streamStatus.hidden = true;
+        try {
+            if (player.getState() === STATE.PAUSED) {
+                player.play();
             }
+            if (player.getState() === STATE.PLAYING) {
+                player.pushFrame(data);
+            }
+        } catch (error) {
+            this.onPlaybackError(error);
         }
     };
 
@@ -237,16 +279,13 @@ export class StreamClientScrcpy
         if (!this.player) {
             return;
         }
-        let currentSettings = this.player.getVideoSettings();
+        let currentSettings = this.desiredProfile ?? this.player.getVideoSettings();
         const displayId = currentSettings.displayId;
         const info = infoArray.find((value) => {
             return value.displayInfo.displayId === displayId;
         });
         if (!info) {
             return;
-        }
-        if (this.player.getState() === BasePlayer.STATE.PAUSED) {
-            this.player.play();
         }
         const { videoSettings, screenInfo } = info;
         if (videoSettings && screenInfo) {
@@ -258,86 +297,231 @@ export class StreamClientScrcpy
         if (typeof this.fitToScreen !== 'boolean') {
             this.fitToScreen = this.player.getFitToScreenStatus();
         }
-        if (this.fitToScreen) {
+        if (this.fitToScreen && !this.joinedStream) {
             const newBounds = this.getMaxSize();
             if (newBounds) {
                 currentSettings = StreamClientScrcpy.createVideoSettingsWithBounds(currentSettings, newBounds);
-                this.player.setVideoSettings(currentSettings, this.fitToScreen, false);
             }
         }
         const applySavedProfile = !this.joinedStream && this.applyProfileOnJoin;
         if (!videoSettings || !screenInfo) {
-            this.joinedStream = true;
-            this.requestProfile(currentSettings);
+            if (!this.joinedStream) {
+                this.joinedStream = true;
+                this.applyNewVideoSettings(currentSettings);
+                this.requestProfile(currentSettings);
+            }
             return;
         }
 
         this.clientsCount = info.connectionCount;
-        let min = VideoSettings.copy(videoSettings);
         const oldInfo = this.player.getScreenInfo();
         if (!screenInfo.equals(oldInfo)) {
             this.player.setScreenInfo(screenInfo);
         }
 
-        if (!videoSettings.equals(currentSettings)) {
+        if (!videoSettings.equals(this.player.getVideoSettings())) {
             this.applyNewVideoSettings(videoSettings);
         }
+        if (this.joinedStream) {
+            return;
+        }
+        let initialProfile = videoSettings;
         if (applySavedProfile) {
-            min = currentSettings;
-        } else if (!oldInfo && !this.joinedStream) {
+            initialProfile = currentSettings;
+        } else if (!oldInfo) {
             const bounds = currentSettings.bounds;
             const videoSize: Size = screenInfo.videoSize;
             const onlyOneClient = this.clientsCount === 0;
-            const smallerThenCurrent = bounds && (bounds.width < videoSize.width || bounds.height < videoSize.height);
-            if (onlyOneClient || smallerThenCurrent) {
-                min = currentSettings;
+            const smallerThanCurrent = bounds && (bounds.width < videoSize.width || bounds.height < videoSize.height);
+            if (onlyOneClient || smallerThanCurrent) {
+                initialProfile = currentSettings;
             }
-            const minBounds = currentSettings.bounds?.intersect(min.bounds);
-            if (minBounds && !minBounds.equals(min.bounds)) {
-                min = StreamClientScrcpy.createVideoSettingsWithBounds(min, minBounds);
+            const minBounds = currentSettings.bounds?.intersect(initialProfile.bounds);
+            if (minBounds && !minBounds.equals(initialProfile.bounds)) {
+                initialProfile = StreamClientScrcpy.createVideoSettingsWithBounds(initialProfile, minBounds);
             }
         }
-        if (!min.equals(videoSettings) || !this.joinedStream) {
-            this.joinedStream = true;
-            this.requestProfile(min);
-        }
+        this.joinedStream = true;
+        this.requestProfile(initialProfile);
     };
 
-    public onDisconnected = (): void => {
-        this.streamReceiver.off('deviceMessage', this.OnDeviceMessage);
-        this.streamReceiver.off('video', this.onVideo);
-        this.streamReceiver.off('clientsStats', this.onClientsStats);
-        this.streamReceiver.off('displayInfo', this.onDisplayInfo);
-        this.streamReceiver.off('disconnected', this.onDisconnected);
+    private onConnected = (): void => this.recovery.connected();
 
+    private onDisconnected = (): void => this.recovery.failed('投屏连接已断开');
+
+    private onFirstFrame = (): void => this.recovery.presented();
+
+    private onPlaybackError = (error: unknown): void => {
+        console.warn(TAG, '播放失败', error);
+        this.recovery.failed('视频解码或播放失败');
+    };
+
+    private connectStream(): void {
+        this.joinedStream = false;
+        this.clientId = this.clientsCount = -1;
+        const player = this.player;
+        if (!player) {
+            return;
+        }
+        if (this.desiredProfile) {
+            this.moreBox?.setRequestedProfile(this.desiredProfile);
+            this.applyNewVideoSettings(this.desiredProfile);
+        }
+        try {
+            const receiver = (this.streamReceiver ??= new StreamReceiverScrcpy(this.params));
+            receiver.on('connected', this.onConnected);
+            receiver.on('deviceMessage', this.OnDeviceMessage);
+            receiver.on('video', this.onVideo);
+            receiver.on('clientsStats', this.onClientsStats);
+            receiver.on('displayInfo', this.onDisplayInfo);
+            receiver.on('disconnected', this.onDisconnected);
+            if (receiver.hasConnection()) {
+                this.onConnected();
+                receiver.triggerInitialInfoEvents();
+            }
+        } catch (error) {
+            console.warn(TAG, '连接失败', error);
+            this.recovery.failed('无法连接投屏服务');
+        }
+    }
+
+    private disconnectStream(): void {
+        const receiver = this.streamReceiver;
+        this.streamReceiver = undefined;
+        if (receiver) {
+            receiver.off('connected', this.onConnected);
+            receiver.off('deviceMessage', this.OnDeviceMessage);
+            receiver.off('video', this.onVideo);
+            receiver.off('clientsStats', this.onClientsStats);
+            receiver.off('displayInfo', this.onDisplayInfo);
+            receiver.off('disconnected', this.onDisconnected);
+            receiver.stop();
+        }
         this.filePushHandler?.release();
         this.filePushHandler = undefined;
         this.touchHandler?.release();
         this.touchHandler = undefined;
-        this.setHandleKeyboardEvents(false);
-        this.fullscreen?.dispose();
-        this.fullscreen = undefined;
+        KeyInputHandler.removeEventListener(this);
         clearTimeout(this.profileTimer);
-        this.moreBox?.dispose();
-        this.player?.stop();
-        if (this.streamStatus && !this.manuallyStopped) {
-            const message = document.createElement('p');
-            message.textContent = '投屏连接已断开';
-            const retry = document.createElement('button');
-            retry.textContent = '重新连接';
-            retry.onclick = () => location.reload();
-            const back = document.createElement('a');
-            back.href = location.pathname;
-            back.textContent = '返回设备列表';
-            this.streamStatus.replaceChildren(message, retry, back);
-            this.streamStatus.hidden = false;
+        this.requestedProfile = this.reportedProfile = undefined;
+        this.moreBox?.setProfileStatus('等待连接后读取画质设置。');
+        this.moreBox?.clearStreamReport();
+        this.player?.resetForStream();
+        this.applyProfileOnJoin = true;
+    }
+
+    private async sessionExpired(): Promise<boolean> {
+        const url = new URL(this.params.ws);
+        if (
+            !this.params.useProxy &&
+            (url.host !== location.host || (url.protocol === 'wss:') !== (location.protocol === 'https:'))
+        ) {
+            return false;
         }
+        const response = await fetch('session', { cache: 'no-store', redirect: 'manual' });
+        return response.status === 401;
+    }
+
+    private showStreamStatus(status: StreamStatus): void {
+        const holder = this.streamStatus;
+        if (!holder) {
+            return;
+        }
+        if (status.state === 'retrying' && this.retryMessage) {
+            this.retryMessage.textContent = `${status.reason}，${status.seconds} 秒后重连…`;
+            return;
+        }
+        this.retryMessage = undefined;
+        if (status.state === 'playing') {
+            holder.hidden = true;
+            this.moreBox?.setConnectionMetrics(status.firstFrameMs, status.reconnects);
+            const player = this.player;
+            if (player && this.streamReceiver) {
+                this.setTouchListeners(player);
+                const element = player.getTouchableElement();
+                this.filePushHandler = new FilePushHandler(element, new ScrcpyFilePushStream(this.streamReceiver));
+                this.filePushHandler.addEventListener(new DragAndPushLogger(element));
+                this.setHandleKeyboardEvents(this.keyboardEnabled);
+            }
+            return;
+        }
+        holder.hidden = false;
+        const message = document.createElement('p');
+        if (status.state === 'connecting' || status.state === 'first-frame') {
+            const spinner = document.createElement('span');
+            spinner.className = 'stream-spinner';
+            spinner.setAttribute('aria-hidden', 'true');
+            message.textContent = status.state === 'connecting' ? '正在连接投屏服务…' : '已连接投屏服务，正在等待首帧…';
+            holder.replaceChildren(spinner, message);
+            return;
+        }
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.textContent = '立即重连';
+        retry.onclick = () => this.recovery.retry();
+        const actions = document.createElement('div');
+        actions.className = 'stream-status-actions';
+        actions.append(retry);
+        if (status.state === 'retrying') {
+            this.retryMessage = message;
+            message.textContent = `${status.reason}，${status.seconds} 秒后重连…`;
+            const pause = document.createElement('button');
+            pause.type = 'button';
+            pause.className = 'secondary-button';
+            pause.textContent = '暂停自动重连';
+            pause.onclick = () => this.recovery.pause();
+            actions.append(pause);
+        } else if (status.state === 'paused') {
+            message.textContent = `${status.reason}，已暂停自动重连。`;
+        } else {
+            message.textContent = '登录已失效，请重新登录后重连。';
+            const login = document.createElement('a');
+            login.href = new URL('login', location.href).href;
+            login.target = '_blank';
+            login.rel = 'noopener';
+            login.textContent = '重新登录';
+            actions.prepend(login);
+        }
+        const back = document.createElement('a');
+        back.href = location.pathname;
+        back.textContent = '返回设备列表';
+        back.onclick = () => this.stopStream();
+        holder.replaceChildren(message, actions, back);
+    }
+
+    private stopStream(): void {
+        this.recovery.stop();
+        this.fullscreen?.dispose();
+        this.moreBox?.dispose();
+        this.player?.off('first-frame', this.onFirstFrame);
+        this.player?.off('playback-error', this.onPlaybackError);
+        this.player?.stop();
         window.removeEventListener('resize', this.onWindowResize);
-        if (this.resizeTimeoutId !== undefined) {
-            clearTimeout(this.resizeTimeoutId);
-            this.resizeTimeoutId = undefined;
+        window.removeEventListener('pagehide', this.onPageHide);
+        window.removeEventListener('pageshow', this.onPageShow);
+        window.removeEventListener('offline', this.onOffline);
+        window.removeEventListener('online', this.onOnline);
+        clearTimeout(this.resizeTimeoutId);
+    }
+
+    private onPageHide = (event: PageTransitionEvent): void => {
+        if (event.persisted) {
+            this.suspended = this.recovery.suspend();
+        } else {
+            this.stopStream();
         }
     };
+
+    private onPageShow = (event: PageTransitionEvent): void => {
+        if (event.persisted && this.suspended) {
+            this.suspended = false;
+            this.recovery.retry();
+        }
+    };
+
+    private onOffline = (): void => this.recovery.failed('浏览器网络已断开');
+
+    private onOnline = (): void => this.recovery.networkRestored();
 
     public startStream({ udid, player, playerName, videoSettings, fitToScreen }: StartParams): void {
         if (!udid) {
@@ -352,10 +536,7 @@ export class StreamClientScrcpy
             if (this.streamReceiver && videoSettings) {
                 displayInfo = this.streamReceiver.getDisplayInfo(videoSettings.displayId);
             }
-            const preferred = StreamClientScrcpy.getPreferredPlayer(udid);
-            const p =
-                StreamClientScrcpy.createPlayer(playerName, udid, displayInfo) ??
-                (preferred && new preferred(udid, displayInfo));
+            const p = StreamClientScrcpy.createPlayer(playerName, udid, displayInfo);
             if (!p) {
                 throw Error(`Unsupported player: "${playerName}"`);
             }
@@ -367,7 +548,6 @@ export class StreamClientScrcpy
         this.fitToScreen = fitToScreen;
         this.player = player;
         this.applyProfileOnJoin = !!videoSettings || player.hasSavedPreference();
-        this.setTouchListeners(player);
 
         if (!videoSettings) {
             videoSettings = player.getVideoSettings();
@@ -375,6 +555,13 @@ export class StreamClientScrcpy
 
         const deviceView = document.createElement('div');
         deviceView.className = 'device-view';
+        try {
+            if (localStorage.getItem('ws_scrcpy::eink_mode') === '1') {
+                deviceView.classList.add('eink-mode');
+            }
+        } catch {
+            // ignore storage errors
+        }
         this.fullscreen = new StreamFullscreen(deviceView, () => this.player?.getScreenInfo()?.videoSize);
         deviceView.tabIndex = -1;
         const stop = (ev?: string | Event) => {
@@ -390,17 +577,17 @@ export class StreamClientScrcpy
             if (parent) {
                 parent.removeChild(moreBox);
             }
-            this.manuallyStopped = true;
-            this.streamReceiver.stop();
-            this.onDisconnected();
+            this.stopStream();
             window.location.assign(location.pathname);
         };
 
         const googMoreBox = (this.moreBox = new GoogMoreBox(udid, player, this));
         const moreBox = googMoreBox.getHolderElement();
         googMoreBox.setOnStop(stop);
+        const isCompact = new URLSearchParams(location.search).get('compact') === '1';
         const googToolBox = GoogToolBox.createToolBox(udid, player, this, googMoreBox, {
             captureKeyboard: this.params.captureKeyboard,
+            onBack: isCompact ? undefined : stop,
         });
         deviceView.appendChild(googToolBox.getHolderElement());
         const video = (this.videoViewport = document.createElement('div'));
@@ -408,7 +595,6 @@ export class StreamClientScrcpy
         const status = (this.streamStatus = document.createElement('div'));
         status.className = 'stream-status';
         status.setAttribute('role', 'status');
-        status.textContent = '正在连接手机…';
         video.append(status);
         deviceView.appendChild(video);
         deviceView.appendChild(moreBox);
@@ -422,18 +608,9 @@ export class StreamClientScrcpy
                 videoSettings = StreamClientScrcpy.createVideoSettingsWithBounds(videoSettings, newBounds);
             }
         }
-        this.applyNewVideoSettings(videoSettings);
-        const element = player.getTouchableElement();
-        const logger = new DragAndPushLogger(element);
-        this.filePushHandler = new FilePushHandler(element, new ScrcpyFilePushStream(this.streamReceiver));
-        this.filePushHandler.addEventListener(logger);
-
-        const streamReceiver = this.streamReceiver;
-        streamReceiver.on('deviceMessage', this.OnDeviceMessage);
-        streamReceiver.on('video', this.onVideo);
-        streamReceiver.on('clientsStats', this.onClientsStats);
-        streamReceiver.on('displayInfo', this.onDisplayInfo);
-        streamReceiver.on('disconnected', this.onDisconnected);
+        this.desiredProfile = videoSettings;
+        player.on('first-frame', this.onFirstFrame);
+        player.on('playback-error', this.onPlaybackError);
         console.log(TAG, player.getName(), udid);
 
         // When the player is in fit-to-screen mode, re-encode the stream at the
@@ -441,6 +618,11 @@ export class StreamClientScrcpy
         // instead of being CSS-scaled. Inert when the user picked a fixed
         // resolution.
         window.addEventListener('resize', this.onWindowResize);
+        window.addEventListener('pagehide', this.onPageHide);
+        window.addEventListener('pageshow', this.onPageShow);
+        window.addEventListener('offline', this.onOffline);
+        window.addEventListener('online', this.onOnline);
+        this.recovery.start();
     }
 
     private resizeTimeoutId?: ReturnType<typeof setTimeout>;
@@ -461,17 +643,18 @@ export class StreamClientScrcpy
         if (!newBounds) {
             return;
         }
-        const current = this.player.getVideoSettings();
+        const current = this.desiredProfile ?? this.player.getVideoSettings();
         if (current.bounds && current.bounds.equals(newBounds)) {
             return;
         }
         const updated = StreamClientScrcpy.createVideoSettingsWithBounds(current, newBounds);
-        this.player.setVideoSettings(updated, true, false);
         this.sendNewVideoSetting(updated, false);
     };
 
     public sendMessage(message: ControlMessage): void {
-        this.streamReceiver.sendEvent(message);
+        if (this.recovery.isPlaying && this.streamReceiver?.hasConnection()) {
+            this.streamReceiver.sendEvent(message);
+        }
     }
 
     public getDeviceName(): string {
@@ -483,7 +666,8 @@ export class StreamClientScrcpy
     }
 
     public setHandleKeyboardEvents(enabled: boolean): void {
-        if (enabled) {
+        this.keyboardEnabled = enabled;
+        if (enabled && this.recovery.isPlaying) {
             KeyInputHandler.addEventListener(this);
         } else {
             KeyInputHandler.removeEventListener(this);
@@ -497,33 +681,36 @@ export class StreamClientScrcpy
     public sendNewVideoSetting(videoSettings: VideoSettings, save = true): void {
         if (save) {
             this.player?.savePreference(videoSettings, this.fitToScreen ?? false);
-            this.requestProfile(videoSettings);
-        } else {
-            this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(videoSettings));
         }
+        this.requestProfile(videoSettings);
     }
 
     private requestProfile(profile: VideoSettings): void {
         clearTimeout(this.profileTimer);
+        this.desiredProfile = profile;
         this.requestedProfile = profile;
+        this.moreBox?.setRequestedProfile(profile);
+        if (!this.streamReceiver?.hasConnection()) {
+            this.moreBox?.setProfileStatus('画质设置将在重连后应用。');
+            return;
+        }
         this.moreBox?.setProfileStatus('正在等待设备确认画质设置…');
-        this.sendMessage(CommandControlMessage.createSetVideoSettingsCommand(profile));
+        this.streamReceiver.sendEvent(CommandControlMessage.createSetVideoSettingsCommand(profile));
         if (!this.reportedProfile || !this.confirmProfile(this.reportedProfile)) {
             this.profileTimer = setTimeout(() => {
-                this.requestedProfile = undefined;
-                this.moreBox?.setProfileStatus('设备未确认请求的码率或帧率，请查看下方设备回报。');
+                this.moreBox?.setProfileStatus('设备未回报相同的画质设置，请对比请求值和设备回报。');
             }, 5000);
         }
     }
 
     private confirmProfile(profile: VideoSettings): boolean {
         const requested = this.requestedProfile;
-        if (!requested || requested.bitrate !== profile.bitrate || requested.maxFps !== profile.maxFps) {
+        if (!requested?.equals(profile)) {
             return false;
         }
         clearTimeout(this.profileTimer);
         this.requestedProfile = undefined;
-        this.moreBox?.setProfileStatus('设备已确认码率和帧率设置');
+        this.moreBox?.setProfileStatus('设备已确认请求的画质设置');
         return true;
     }
 
@@ -587,8 +774,8 @@ export class StreamClientScrcpy
         return;
     }
 
-    private static onConfigureStreamClick = (event: MouseEvent): void => {
-        const button = event.currentTarget as HTMLAnchorElement;
+    private static onConfigureStreamClick = async (event: MouseEvent): Promise<void> => {
+        const button = event.currentTarget as HTMLButtonElement;
         const udid = Util.parseStringEnv(button.getAttribute(Attribute.UDID) || '');
         const fullName = button.getAttribute(Attribute.FULL_NAME);
         const secure = Util.parseBooleanEnv(button.getAttribute(Attribute.SECURE) || undefined) || false;
@@ -637,8 +824,22 @@ export class StreamClientScrcpy
             pathname,
             useProxy,
         };
-        const dialog = new ConfigureScrcpy(tracker, descriptor, options);
-        dialog.on('closed', StreamClientScrcpy.onConfigureDialogClosed);
+        button.disabled = true;
+        try {
+            const players = await this.loadPlayers();
+            if (!button.isConnected) {
+                return;
+            }
+            if (!players.length) {
+                button.textContent = '无法加载播放器 · 重试';
+                return;
+            }
+            button.textContent = '投屏设置';
+            const dialog = new ConfigureScrcpy(tracker, descriptor, options, players);
+            dialog.on('closed', StreamClientScrcpy.onConfigureDialogClosed);
+        } finally {
+            button.disabled = false;
+        }
     };
 
     private static onConfigureDialogClosed = (event: { dialog: ConfigureScrcpy; result: boolean }): void => {

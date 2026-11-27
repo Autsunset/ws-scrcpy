@@ -14,14 +14,27 @@
     max-height: calc(100% - 1.3rem);
     overflow: auto;
     overscroll-behavior: contain;
+    scrollbar-width: thin;
     padding: 1rem;
     border: 1px solid var(--border-strong-color);
-    border-radius: 1rem;
+    border-radius: 4px;
     background: var(--controls-bg-color);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     box-shadow: var(--shadow-lg);
     font: 0.92rem/1.5 var(--font-sans);
+    animation: morebox-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes morebox-in {
+    from {
+        opacity: 0;
+        transform: translateX(6px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
 }
 
 .text-with-shadow,
@@ -44,7 +57,7 @@
     gap: 0.4rem;
     margin-top: 0.75rem;
     padding: 0.45rem 0.65rem;
-    border-radius: 0.55rem;
+    border-radius: 3px;
     background: var(--surface-muted-color);
     font-weight: 600;
     cursor: pointer;
@@ -82,7 +95,7 @@
     box-sizing: border-box;
     padding: 0.42rem 0.7rem;
     border: 1px solid var(--border-strong-color);
-    border-radius: 0.55rem;
+    border-radius: 3px;
     color: var(--text-color);
     background: var(--surface-bg-color);
     font: inherit;
@@ -132,7 +145,7 @@
     color: var(--accent-text-color);
     background: var(--accent-color);
     font-weight: 600;
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+    box-shadow: none;
 }
 
 .more-box .box > button:last-child:hover {
@@ -149,7 +162,7 @@
 .more-box .stream-report {
     margin: 0.55rem 0 0.25rem;
     padding: 0.45rem 0.65rem;
-    border-radius: 0.55rem;
+    border-radius: 3px;
     background: var(--surface-muted-color);
     color: var(--text-color-light);
     font-family: var(--font-mono);
@@ -157,8 +170,37 @@
     line-height: 1.45;
 }
 
-.more-box .stream-report:empty {
+.more-box .stream-report:empty,
+.more-box .action-status:empty {
     display: none;
+}
+
+.more-box .action-status {
+    margin: 0.35rem 0 0;
+    padding: 0.35rem 0.65rem;
+    border-radius: 3px;
+    background: var(--accent-soft-color);
+    color: var(--accent-color);
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.more-box .screen-power-actions {
+    gap: 0.45rem;
+}
+
+.more-box .screen-power-actions button {
+    flex: 1;
+}
+
+.more-box button.danger-button {
+    width: 100%;
+    color: var(--kill-button-hover-color);
+    border-color: rgba(225, 29, 72, 0.35);
+}
+
+.more-box button.danger-button:hover {
+    background: rgba(225, 29, 72, 0.1);
 }
 
 .touch-controls {
@@ -172,6 +214,15 @@
     font-weight: 600;
     color: var(--text-color-light);
     cursor: pointer;
+}
+
+@media (pointer: fine) {
+    body.stream:not(.compact-stream) .more-box {
+        top: 0.9rem;
+        right: calc(var(--panel-width) + 1.65rem);
+        width: min(23.5rem, calc(100% - var(--panel-width) - 2.5rem));
+        max-height: calc(100% - 1.8rem);
+    }
 }
 
 @media (pointer: coarse) {

@@ -39,7 +39,7 @@ export class BitrateControl {
             }
         };
         this.input.oninput = () => this.syncControls();
-        this.element.append(this.slider, this.input, this.presets);
+        this.element.append(this.input, this.presets, this.slider);
         this.setValue(8 * BITS_PER_MEGABIT);
     }
 

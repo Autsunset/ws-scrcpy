@@ -123,6 +123,8 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
             );
             if (primary) {
                 link.classList.add('primary-stream');
+            } else {
+                link.classList.add('secondary-stream');
             }
             if (
                 (isAppMode() || matchMedia('(pointer: coarse)').matches) &&
@@ -204,17 +206,29 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
         const isActive = device.state === DeviceState.DEVICE;
         const manufacturer = device['ro.product.manufacturer'] || '';
         const model = device['ro.product.model'] || 'Android';
+        const status = isActive ? (device.pid > 0 ? '投屏就绪' : '设备在线') : '离线';
         let hasPid = false;
         const servicesId = `device_services_${fullName}`;
         const row = html`<div class="device ${isActive ? 'active' : 'not-active'}">
             <div class="device-header">
-                <div class="device-name">${manufacturer} ${model}</div>
-                <div class="device-serial">${device.udid}</div>
-                <div class="device-version">
-                    <div class="release-version">${device['ro.build.version.release']}</div>
-                    <div class="sdk-version">${device['ro.build.version.sdk']}</div>
+                <div class="device-thumb" aria-hidden="true">
+                    <span class="device-thumb-notch"></span>
+                    <span class="device-thumb-screen"></span>
+                    <span class="device-thumb-bar"></span>
                 </div>
-                <div class="device-state" title="State: ${device.state}">${isActive ? '在线' : '离线'}</div>
+                <div class="device-meta">
+                    <div class="device-title-line">
+                        <div class="device-name">${manufacturer} ${model}</div>
+                        <div class="device-state" title="State: ${device.state}">${status}</div>
+                    </div>
+                    <div class="device-badges">
+                        <div class="device-serial">${device.udid}</div>
+                        <div class="device-version">
+                            <div class="release-version">${device['ro.build.version.release']}</div>
+                            <div class="sdk-version">${device['ro.build.version.sdk']}</div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div id="${servicesId}" class="services"></div>
         </div>`.content;
@@ -236,7 +250,8 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
             }
         });
 
-        const streamEntry = StreamClientScrcpy.createEntryForDeviceList(device, blockClass, fullName, this.params);
+        const streamEntry =
+            isActive && StreamClientScrcpy.createEntryForDeviceList(device, blockClass, fullName, this.params);
         streamEntry && services.appendChild(streamEntry);
 
         DESC_COLUMNS.forEach((item) => {
@@ -362,7 +377,7 @@ export class DeviceTracker extends BaseDeviceTracker<GoogDeviceDescriptor, never
         }
 
         tbody.appendChild(row);
-        if (DeviceTracker.CREATE_DIRECT_LINKS && hasPid && selectedInterfaceUrl) {
+        if (DeviceTracker.CREATE_DIRECT_LINKS && isActive && hasPid && selectedInterfaceUrl) {
             this.updateLink({
                 url: selectedInterfaceUrl,
                 name: selectedInterfaceName,

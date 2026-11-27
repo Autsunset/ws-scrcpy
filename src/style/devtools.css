@@ -1,7 +1,9 @@
 
 body.devtools {
-    font-family: Ubuntu, Arial, sans-serif;
-    font-size: 13px;
+    font-family: var(--font-sans);
+    font-size: var(--font-size);
+    background: var(--main-bg-color);
+    color: var(--text-color);
 }
 
 body.devtools .device {

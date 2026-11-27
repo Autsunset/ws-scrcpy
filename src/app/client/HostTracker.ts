@@ -31,6 +31,7 @@ export class HostTracker extends ManagerClient<ParamsBase, HostTrackerEvents> {
     }
 
     private trackers: Array<GoogDeviceTracker | ApplDeviceTracker> = [];
+    private reconnectTimer?: number;
 
     constructor() {
         super({ action: ACTION.LIST_HOSTS });
@@ -41,8 +42,12 @@ export class HostTracker extends ManagerClient<ParamsBase, HostTrackerEvents> {
     }
 
     protected onSocketClose(ev: CloseEvent): void {
+        if (this.destroyed) {
+            return;
+        }
         console.log(TAG, 'WS closed');
         this.emit('disconnected', ev);
+        this.reconnectTimer = window.setTimeout(() => this.openNewConnection(), 2000);
     }
 
     protected onSocketMessage(event: MessageEvent): void {
@@ -89,15 +94,20 @@ export class HostTracker extends ManagerClient<ParamsBase, HostTrackerEvents> {
     }
 
     private startTracker(hostItem: HostItem): void {
+        let tracker: GoogDeviceTracker | ApplDeviceTracker;
         switch (hostItem.type) {
             case 'android':
-                this.trackers.push(GoogDeviceTracker.start(hostItem));
+                tracker = GoogDeviceTracker.start(hostItem);
                 break;
             case 'ios':
-                this.trackers.push(ApplDeviceTracker.start(hostItem));
+                tracker = ApplDeviceTracker.start(hostItem);
                 break;
             default:
                 console.warn(TAG, `Unsupported host type: "${hostItem.type}"`);
+                return;
+        }
+        if (!this.trackers.includes(tracker)) {
+            this.trackers.push(tracker);
         }
     }
 
@@ -106,6 +116,7 @@ export class HostTracker extends ManagerClient<ParamsBase, HostTrackerEvents> {
     }
 
     public destroy(): void {
+        window.clearTimeout(this.reconnectTimer);
         super.destroy();
         this.trackers.forEach((tracker) => {
             tracker.destroy();

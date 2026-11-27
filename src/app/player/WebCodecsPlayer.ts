@@ -1,4 +1,5 @@
 import { BaseCanvasBasedPlayer } from './BaseCanvasBasedPlayer';
+import { BasePlayer } from './BasePlayer';
 import VideoSettings from '../VideoSettings';
 import Size from '../Size';
 import { DisplayInfo } from '../DisplayInfo';
@@ -125,8 +126,16 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
             error: (error: DOMException) => {
                 console.error(error, `code: ${error.code}`);
                 this.stop();
+                this.emit('playback-error', error);
             },
         });
+    }
+
+    public play(): void {
+        super.play();
+        if (this.getState() === BasePlayer.STATE.PLAYING && this.decoder.state === 'closed') {
+            this.decoder = this.createDecoder();
+        }
     }
 
     protected scaleCanvas(width: number, height: number): void {
@@ -210,6 +219,7 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
         } catch (error) {
             console.error(`[${this.name}]`, error);
             this.stop();
+            this.emit('playback-error', error);
         }
     }
 
@@ -242,6 +252,10 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
                 const frame: VideoFrame = data.frame;
                 try {
                     this.context.drawImage(frame, 0, 0);
+                    this.onFramePresented();
+                } catch (error) {
+                    this.emit('playback-error', error);
+                    return;
                 } finally {
                     frame.close();
                 }
@@ -276,6 +290,9 @@ export class WebCodecsPlayer extends BaseCanvasBasedPlayer {
 
     public stop(): void {
         super.stop();
+        this.configuration = this.sps = this.pps = undefined;
+        this.needsKeyFrame = true;
+        this.timestamp = -1;
         if (this.decoder.state !== 'closed') {
             this.decoder.close();
         }

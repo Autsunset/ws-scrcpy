@@ -1,5 +1,18 @@
+import { createHash } from 'crypto';
+
+const resumeSession = `window.addEventListener('pageshow', () => {
+    fetch('./session', { credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
+        .then(response => {
+            if (response.status === 204) location.replace('./' + location.hash);
+        })
+        .catch(() => {});
+});`;
+const resumeHash = createHash('sha256').update(resumeSession).digest('base64');
+
 export function sessionPage(mode: 'login' | 'logout', error?: string): string {
     const signingIn = mode === 'login';
+    const checkSession = signingIn && !error;
+    const resumePolicy = checkSession ? `; connect-src 'self'; script-src 'sha256-${resumeHash}'` : '';
     const title = signingIn ? '登录云手机' : '退出登录';
     return `<!doctype html>
 <html lang="zh-CN">
@@ -7,49 +20,52 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="referrer" content="same-origin">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; manifest-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'">
-    <meta name="theme-color" content="#0b111e">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; manifest-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'${resumePolicy}">
+    ${checkSession ? `<script>${resumeSession}</script>` : ''}
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fafafa">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <link rel="manifest" href="./app.webmanifest">
-    <link rel="apple-touch-icon" href="./pwa/apple-touch-icon.png">
+    <link rel="manifest" href="./app.webmanifest" crossorigin="use-credentials">
+    <link rel="apple-touch-icon" href="./pwa/apple-touch-icon.png?v=nimbus">
     <title>${title} · ws-scrcpy</title>
     <style>
         :root {
             color-scheme: light dark;
-            font: 100%/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-            --bg: #f4f6f9;
+            font: 100%/1.5 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --bg: #fafafa;
             --surface: #ffffff;
-            --ink: #0f172a;
-            --muted: #64748b;
-            --field: #f8fafc;
-            --line: #e2e8f0;
-            --line-strong: #cbd5e1;
-            --accent: #2563eb;
-            --accent-hover: #1d4ed8;
-            --accent-soft: rgba(37, 99, 235, 0.14);
+            --ink: #171717;
+            --muted: #666666;
+            --field: #ffffff;
+            --line: #ebebeb;
+            --line-strong: #d4d4d4;
+            --accent: #171717;
+            --accent-hover: #333333;
+            --accent-soft: rgba(23, 23, 23, 0.1);
             --on-accent: #ffffff;
-            --error: #e11d48;
-            --error-bg: rgba(225, 29, 72, 0.08);
-            --shadow: 0 20px 50px rgba(15, 23, 42, 0.08);
+            --error: #ee0000;
+            --error-bg: rgba(238, 0, 0, 0.06);
+            --shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
             background: var(--bg);
             color: var(--ink);
         }
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg: #0b111e;
-                --surface: #131c2e;
-                --ink: #f1f5f9;
-                --muted: #94a3b8;
-                --field: #0f172a;
-                --line: rgba(148, 163, 184, 0.16);
-                --line-strong: rgba(148, 163, 184, 0.28);
-                --accent: #3b82f6;
-                --accent-hover: #2563eb;
-                --accent-soft: rgba(59, 130, 246, 0.22);
-                --on-accent: #ffffff;
-                --error: #fda4af;
-                --error-bg: rgba(251, 113, 133, 0.12);
-                --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+                --bg: #000000;
+                --surface: #0a0a0a;
+                --ink: #ededed;
+                --muted: #888888;
+                --field: #000000;
+                --line: #262626;
+                --line-strong: #3d3d3d;
+                --accent: #ededed;
+                --accent-hover: #ffffff;
+                --accent-soft: rgba(255, 255, 255, 0.14);
+                --on-accent: #0a0a0a;
+                --error: #ff6b6b;
+                --error-bg: rgba(255, 77, 77, 0.12);
+                --shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
             }
         }
         * { box-sizing: border-box; }
@@ -60,6 +76,7 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
             display: grid;
             grid-template-rows: auto 1fr auto;
             padding-inline: max(clamp(1rem, 4vw, 3rem), env(safe-area-inset-left), env(safe-area-inset-right));
+            background: var(--bg);
         }
         header {
             min-height: 4.25rem;
@@ -78,8 +95,8 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
             place-self: center;
             padding: 2rem 1.75rem;
             margin-block: 2rem;
-            border: 1px solid var(--line);
-            border-radius: 1.15rem;
+            border: 1px solid var(--line-strong);
+            border-radius: 4px;
             background: var(--surface);
             box-shadow: var(--shadow);
         }
@@ -93,20 +110,20 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
         p { color: var(--muted); font-size: .92rem; margin: 0 0 1.5rem; }
         form { display: grid; gap: .6rem; }
         label { font-size: .875rem; font-weight: 600; }
-        input, button {
+        input[type="password"], button {
             width: 100%;
             min-height: 2.85rem;
             padding: .65rem .9rem;
             font: inherit;
-            border-radius: .6rem;
+            border-radius: 3px;
         }
-        input {
+        input[type="password"] {
             border: 1px solid var(--line-strong);
             background: var(--field);
             color: var(--ink);
             transition: border-color .15s ease, box-shadow .15s ease;
         }
-        input:focus {
+        input[type="password"]:focus {
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-soft);
@@ -118,17 +135,19 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
             background: var(--accent);
             font-weight: 600;
             cursor: pointer;
-            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+            box-shadow: none;
             transition: background-color .15s ease, transform .1s ease;
         }
         button:hover { background: var(--accent-hover); }
+        .remember { display: flex; align-items: center; gap: .5rem; min-height: 2.5rem; cursor: pointer; }
+        .remember input { width: 1.1rem; height: 1.1rem; margin: 0; accent-color: var(--accent); }
         button:active { transform: scale(0.99); }
         :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
         .error {
             color: var(--error);
             background: var(--error-bg);
             padding: .55rem .75rem;
-            border-radius: .5rem;
+            border-radius: 3px;
             margin: .2rem 0;
             font-size: .875rem;
         }
@@ -138,7 +157,7 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
             text-align: center;
             text-decoration: none;
             font-size: .9rem;
-            border-radius: .5rem;
+            border-radius: 3px;
         }
         a:hover { color: var(--ink); background: var(--field); }
         footer {
@@ -164,7 +183,8 @@ export function sessionPage(mode: 'login' | 'logout', error?: string): string {
         <form method="post" action="./${mode}">
             ${
                 signingIn
-                    ? '<label for="password">访问密码</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>'
+                    ? `<label for="password">访问密码</label><input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+                       <label class="remember"><input name="remember" type="checkbox" value="yes">在此设备保持登录 14 天</label>`
                     : ''
             }
             ${error ? `<p class="error" role="alert">${error}</p>` : ''}

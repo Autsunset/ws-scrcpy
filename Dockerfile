@@ -19,7 +19,7 @@ FROM ${NODE_IMAGE} AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends adb \
     && rm -rf /var/lib/apt/lists/* \
-    && install -d -o node -g node -m 0700 /home/node/.android
+    && install -d -o node -g node -m 0700 /home/node/.android /home/node/.ws-scrcpy
 
 WORKDIR /app
 ENV NODE_ENV=production \

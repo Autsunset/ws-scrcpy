@@ -72,7 +72,7 @@ export abstract class ManagerClient<P extends ParamsBase, TE extends EventMap> e
         }
         this.destroyed = true;
         if (this.ws) {
-            if (this.ws.readyState === this.ws.OPEN) {
+            if (this.ws.readyState === this.ws.OPEN || this.ws.readyState === this.ws.CONNECTING) {
                 this.ws.close();
             }
         }

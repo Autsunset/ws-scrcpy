@@ -33,6 +33,7 @@ async function loadGoogModules() {
     const { WebsocketProxyOverAdb } = await import('./goog-device/mw/WebsocketProxyOverAdb');
 
     if (config.runLocalGoogTracker) {
+        HttpServer.setDeviceReadiness(() => ControlCenter.getInstance().getReadiness());
         mw2List.push(DeviceTracker);
         // Also expose the tracker as a plain-JSON WebSocket
         // (?action=goog-device-list) on the top-level server, in addition to the
